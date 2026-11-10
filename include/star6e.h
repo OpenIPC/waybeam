@@ -527,6 +527,8 @@ _Static_assert(sizeof(MI_VENC_ParamH265SliceSplit_t) == 8,
 #define MI_VENC_GetRcParam(chn, p)    g_mi_venc.fnGetRcParam((chn), (p))
 #define MI_VENC_SetRcParam(chn, p)    g_mi_venc.fnSetRcParam((chn), (p))
 #define MI_VENC_RequestIdr(chn, inst) g_mi_venc.fnRequestIdr((chn), (inst))
+#define MI_VENC_SetMaxStreamCnt(chn, n) \
+	(g_mi_venc.fnSetMaxStreamCnt ? g_mi_venc.fnSetMaxStreamCnt((chn), (n)) : -1)
 #define MI_VENC_SetRoiCfg(chn, cfg)   g_mi_venc.fnSetRoiCfg((chn), (cfg))
 #define MI_VENC_GetRoiCfg(chn, idx, cfg) g_mi_venc.fnGetRoiCfg((chn), (idx), (cfg))
 #define MI_VENC_GetChnDevid(chn, dev) g_mi_venc.fnGetChnDevid((chn), (dev))

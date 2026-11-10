@@ -34,6 +34,8 @@
     "sceneThreshold": 0,
     "sceneHoldoff": 2,
     "sliceCount": 1,
+    "frameGateCloseSlots": 0,
+    "frameGateMaxClosedMs": 0,
     "resilience": "off",
     "intraRefreshQp": 0,
     "zoomX": 0.5,

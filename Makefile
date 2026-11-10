@@ -74,7 +74,7 @@ VENC_VERSION := $(shell cat VERSION 2>/dev/null || echo unknown)
 # application silently mixes two struct stat/off_t layouts across a link.
 COMMON_CFLAGS := -Os -Iinclude -Ilib -DVENC_VERSION=\"$(VENC_VERSION)\" -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -MMD -MP
 CONFIG_SRC := src/venc_config.c src/venc_httpd.c src/venc_api.c src/venc_webui.c src/venc_recordings.c src/sensor_select.c src/venc_ring.c src/venc_frame_ring.c lib/cJSON.c
-HELPER_SRC := src/backend.c src/file_util.c src/h26x_util.c src/h26x_param_sets.c src/codec_config.c src/pipeline_common.c src/scene_detector.c src/sdk_quiet.c src/rtp_packetizer.c src/hevc_rtp.c src/intra_refresh.c src/isp_runtime.c src/rtp_session.c src/stream_metrics.c src/rtp_sidecar.c src/output_socket.c src/timing.c src/idr_rate_limit.c src/debug_osd.c src/debug_osd_draw.c src/imu_bmi270.c src/audio_codec.c src/venc_jpeg.c src/venc_rec_writer.c src/venc_respawn.c src/mdns_wire.c src/mdns_beacon.c src/device_id.c src/framing_kalman.c src/attitude_est.c src/detect_wire.c
+HELPER_SRC := src/backend.c src/file_util.c src/h26x_util.c src/h26x_param_sets.c src/codec_config.c src/pipeline_common.c src/scene_detector.c src/sdk_quiet.c src/rtp_packetizer.c src/hevc_rtp.c src/intra_refresh.c src/frame_gate.c src/isp_runtime.c src/rtp_session.c src/stream_metrics.c src/rtp_sidecar.c src/output_socket.c src/timing.c src/idr_rate_limit.c src/debug_osd.c src/debug_osd_draw.c src/imu_bmi270.c src/audio_codec.c src/venc_jpeg.c src/venc_rec_writer.c src/venc_respawn.c src/mdns_wire.c src/mdns_beacon.c src/device_id.c src/framing_kalman.c src/attitude_est.c src/detect_wire.c
 MARUKO_ONLY_SRC := src/maruko_mi.c src/maruko_config.c src/maruko_video.c src/maruko_controls.c src/maruko_output.c src/maruko_pipeline.c src/maruko_runtime.c src/maruko_iq.c src/maruko_cus3a.c src/maruko_ts_recorder.c src/maruko_recorder.c src/maruko_audio.c src/maruko_jpeg.c src/maruko_stabfill_probe.c src/maruko_ipu_yolo.c src/maruko_scl_ports.c
 STAR6E_ONLY_SRC := src/star6e_output.c src/star6e_audio.c src/star6e_hevc_rtp.c src/star6e_video.c src/star6e_pipeline.c src/star6e_controls.c src/star6e_runtime.c src/star6e_cus3a.c src/star6e_iq.c src/star6e_jpeg.c src/star6e_ipu.c src/star6e_ipu_yolo.c src/star6e_vpe_ports.c src/star6e_luma_tap.c src/star6e_awb.c
 # Shared recorder core: the state machine, the TS mux and the contiguous-AU
@@ -88,12 +88,13 @@ CV610_SRC := src/main.c src/backend_cv610.c src/cv610_runtime.c \
 	src/cv610_iq.c \
 	src/cv610_modes.c \
 	src/cv610_pq_bin.c \
+	src/cv610_pq_bin_load.c \
 	src/cv610_jpeg.c \
 	src/cv610_pipeline.c src/cv610_validation.c src/backend.c \
 	src/venc_config.c src/venc_httpd.c src/venc_api.c src/venc_webui.c \
 	src/venc_jpeg.c src/venc_rec_writer.c $(RECORDER_SRC) \
 	src/venc_recordings.c src/codec_config.c src/pipeline_common.c \
-	src/file_util.c src/idr_rate_limit.c src/timing.c src/intra_refresh.c \
+	src/file_util.c src/idr_rate_limit.c src/timing.c src/intra_refresh.c src/frame_gate.c \
 	src/framing_kalman.c src/attitude_est.c src/debug_osd.c \
 	src/debug_osd_draw.c lib/cJSON.c \
 	src/h26x_util.c src/h26x_param_sets.c src/rtp_packetizer.c \
@@ -451,6 +452,7 @@ TEST_SRCS    := tests/test_runner.c tests/test_venc_config.c \
                 tests/test_backend.c \
                 tests/test_debug_osd.c \
                 tests/test_intra_refresh.c \
+                tests/test_frame_gate.c \
                 tests/test_venc_jpeg.c \
                 tests/test_mdns_beacon.c \
                 tests/test_framing_kalman.c \
@@ -461,39 +463,70 @@ TEST_SRCS    := tests/test_runner.c tests/test_venc_config.c \
                 tests/test_detect_wire.c \
                 tests/test_star6e_vpe_ports.c \
                 tests/test_maruko_scl_ports.c \
+                tests/test_cv610_pq_bin_load.c \
                 tests/test_qr_scan.c
 # Production sources compiled into the test binary (pure-logic modules only).
 # sensor_select.c is included here; its MI_SNR_* deps are stubbed in test_sensor_select.c.
 TEST_LIB_SRCS := src/qr_scan.c tools/qr/waybeam_qr_format.c \
 	tools/qr/quirc/quirc.c tools/qr/quirc/decode.c \
 	tools/qr/quirc/identify.c tools/qr/quirc/version_db.c \
-	src/backend.c src/venc_config.c src/venc_api.c src/venc_httpd.c src/venc_webui.c src/venc_recordings.c src/sensor_select.c src/venc_ring.c src/venc_frame_ring.c src/file_util.c src/h26x_util.c src/h26x_param_sets.c src/intra_refresh.c src/isp_runtime.c src/maruko_config.c src/maruko_video.c src/maruko_output.c src/codec_config.c src/pipeline_common.c src/rtp_session.c src/sdk_quiet.c src/rtp_packetizer.c src/hevc_rtp.c src/star6e_hevc_rtp.c src/star6e_output.c src/star6e_audio.c src/audio_codec.c src/star6e_video.c src/star6e_recorder.c src/star6e_ts_recorder.c src/ts_mux.c src/venc_rec_writer.c src/rtp_sidecar.c src/stream_metrics.c src/output_socket.c src/timing.c src/idr_rate_limit.c src/debug_osd_draw.c src/venc_jpeg.c src/mdns_wire.c src/mdns_beacon.c src/device_id.c src/framing_kalman.c src/attitude_est.c src/detect_dequant.c src/detect_wire.c src/star6e_vpe_ports.c src/maruko_scl_ports.c lib/cJSON.c
+	src/backend.c src/venc_config.c src/venc_api.c src/venc_httpd.c src/venc_webui.c src/venc_recordings.c src/sensor_select.c src/venc_ring.c src/venc_frame_ring.c src/file_util.c src/h26x_util.c src/h26x_param_sets.c src/intra_refresh.c src/frame_gate.c src/isp_runtime.c src/maruko_config.c src/maruko_video.c src/maruko_output.c src/codec_config.c src/pipeline_common.c src/cv610_pq_bin_load.c src/rtp_session.c src/sdk_quiet.c src/rtp_packetizer.c src/hevc_rtp.c src/star6e_hevc_rtp.c src/star6e_output.c src/star6e_audio.c src/audio_codec.c src/star6e_video.c src/star6e_recorder.c src/star6e_ts_recorder.c src/ts_mux.c src/venc_rec_writer.c src/rtp_sidecar.c src/stream_metrics.c src/output_socket.c src/timing.c src/idr_rate_limit.c src/debug_osd_draw.c src/venc_jpeg.c src/mdns_wire.c src/mdns_beacon.c src/device_id.c src/framing_kalman.c src/attitude_est.c src/detect_dequant.c src/detect_wire.c src/star6e_vpe_ports.c src/maruko_scl_ports.c lib/cJSON.c
 
-$(TEST_RUNNER): $(TEST_SRCS) $(TEST_LIB_SRCS) tests/test_helpers.h include/backend.h include/venc_api.h include/h26x_param_sets.h include/hevc_rtp.h include/isp_runtime.h include/maruko_config.h include/pipeline_common.h include/rtp_packetizer.h include/rtp_session.h include/rtp_sidecar.h include/star6e_audio.h include/star6e_hevc_rtp.h include/star6e_output.h include/star6e_recorder.h include/star6e_ts_recorder.h include/ts_mux.h include/audio_ring.h include/star6e_video.h include/stream_metrics.h include/venc_frame_ring.h
+# Every header the test oracles can reach, not a hand-picked list.  They build
+# as one compiler invocation each, so there are no .d files to drive this the
+# way -MMD does for the cross builds -- and a hand-maintained list silently
+# runs a STALE test binary when a header-only change is not on it.  That is a
+# false PASS: the suite runs against the previous code and reports green,
+# which is strictly worse than a build error because it is indistinguishable
+# from success.
+#
+# Every tree the tests compile from must be here.  0.85.2 replaced a 20-header
+# list with include/*.h alone and still left five reachable headers uncovered
+# (lib/cJSON.h, tests/qr_marker_render.h and three under tools/qr), so the hole
+# it set out to close was still open: appending `#error POISON` to lib/cJSON.h
+# and re-running printed 3147 passed.  A full rebuild is ~9 s, far cheaper than
+# one undetected stale run, so the globs are deliberately wide.
+#
+# QR_TEST_RUNNER and QR_HOST_DECODE share this: `verify` depends on
+# qr-test-host, so a stale QR oracle is a green verify.
+TEST_HEADERS := $(wildcard include/*.h) $(wildcard tests/*.h) \
+	$(wildcard lib/*.h) $(wildcard tools/qr/*.h) \
+	$(wildcard tools/qr/quirc/*.h) $(wildcard tools/qr/stb/*.h)
+
+$(TEST_RUNNER): $(TEST_SRCS) $(TEST_LIB_SRCS) $(TEST_HEADERS)
 	$(HOST_CC) $(HOST_CFLAGS) $(TEST_SRCS) $(TEST_LIB_SRCS) -lpthread -ldl -lm -o $@
 
 $(CV610_VALIDATION_TEST): tests/test_cv610_validation.c src/cv610_validation.c \
 		src/cv610_modes.c \
-		src/cv610_encoder_config.c src/intra_refresh.c \
-		src/venc_config.c src/codec_config.c lib/cJSON.c
-	$(HOST_CC) $(HOST_CFLAGS) -Werror $^ -lm -o $@
+		src/cv610_encoder_config.c src/intra_refresh.c src/frame_gate.c \
+		src/venc_config.c src/codec_config.c lib/cJSON.c $(TEST_HEADERS)
+	$(HOST_CC) $(HOST_CFLAGS) -Werror $(filter %.c,$^) -lm -o $@
 
 test: $(TEST_RUNNER) $(CV610_VALIDATION_TEST)
 	./$(TEST_RUNNER)
 	./$(CV610_VALIDATION_TEST)
 
-test-werror: HOST_CFLAGS += -Werror
-test-werror: $(TEST_RUNNER) $(CV610_VALIDATION_TEST)
-	./$(TEST_RUNNER)
-	./$(CV610_VALIDATION_TEST)
+# Distinct output binaries per variant.  Compiling each over $(TEST_RUNNER)
+# left the instrumented binary behind, and a later `make test` saw it
+# up-to-date and silently ran it.  `test-werror` was worse: a target-specific
+# HOST_CFLAGS with nothing to force a rebuild meant the -Werror compile was
+# skipped entirely once the runner existed, so it only ever re-ran the
+# non-werror binary.  These always rebuild (no prerequisites).
+TEST_RUNNER_WERROR := tests/test_runner.werror
+TEST_RUNNER_ASAN   := tests/test_runner.asan
+TEST_RUNNER_TSAN   := tests/test_runner.tsan
+
+test-werror:
+	$(HOST_CC) $(HOST_CFLAGS) -Werror $(TEST_SRCS) $(TEST_LIB_SRCS) -lpthread -ldl -lm -o $(TEST_RUNNER_WERROR)
+	./$(TEST_RUNNER_WERROR)
 
 test-asan:
-	$(HOST_CC) $(HOST_CFLAGS) -Werror -fsanitize=address,undefined $(TEST_SRCS) $(TEST_LIB_SRCS) -lpthread -ldl -lm -o $(TEST_RUNNER)
-	./$(TEST_RUNNER)
+	$(HOST_CC) $(HOST_CFLAGS) -Werror -fsanitize=address,undefined $(TEST_SRCS) $(TEST_LIB_SRCS) -lpthread -ldl -lm -o $(TEST_RUNNER_ASAN)
+	./$(TEST_RUNNER_ASAN)
 
 test-tsan:
-	$(HOST_CC) $(HOST_CFLAGS) -Werror -fsanitize=thread $(TEST_SRCS) $(TEST_LIB_SRCS) -lpthread -ldl -lm -o $(TEST_RUNNER)
-	./$(TEST_RUNNER)
+	$(HOST_CC) $(HOST_CFLAGS) -Werror -fsanitize=thread $(TEST_SRCS) $(TEST_LIB_SRCS) -lpthread -ldl -lm -o $(TEST_RUNNER_TSAN)
+	./$(TEST_RUNNER_TSAN)
 
 test-ci: test test-asan test-tsan
 
@@ -503,8 +536,7 @@ QR_TEST_SRCS   := tests/test_qr_marker.c tools/qr/waybeam_qr_format.c \
 		  tools/qr/quirc/quirc.c tools/qr/quirc/decode.c \
 		  tools/qr/quirc/identify.c tools/qr/quirc/version_db.c
 
-$(QR_TEST_RUNNER): $(QR_TEST_SRCS) tools/qr/waybeam_qr_format.h \
-		   tools/qr/quirc/quirc.h tools/qr/quirc/quirc_internal.h
+$(QR_TEST_RUNNER): $(QR_TEST_SRCS) $(TEST_HEADERS)
 	$(HOST_CC) -std=c99 -Wall -Wextra -g -O0 -D_GNU_SOURCE \
 		$(QR_MATH_CFLAGS) -Itools/qr -Itools/qr/quirc \
 		$(QR_TEST_SRCS) -lm -o $@
@@ -512,9 +544,7 @@ $(QR_TEST_RUNNER): $(QR_TEST_SRCS) tools/qr/waybeam_qr_format.h \
 qr-test-host: $(QR_TEST_RUNNER)
 	./$(QR_TEST_RUNNER)
 
-$(QR_HOST_DECODE): $(QR_DECODE_SRC) tools/qr/waybeam_qr_format.h \
-		   tools/qr/quirc/quirc.h tools/qr/quirc/quirc_internal.h \
-		   tools/qr/stb/stb_image.h include/qr_scan.h
+$(QR_HOST_DECODE): $(QR_DECODE_SRC) $(TEST_HEADERS)
 	$(HOST_CC) $(QR_OPT_CFLAGS) -Wall -Wextra -std=c99 -D_GNU_SOURCE \
 		$(QR_MATH_CFLAGS) -Iinclude -Itools/qr -Itools/qr/quirc -Itools/qr/stb $(QR_DECODE_SRC) \
 		$(QR_GC_LDFLAGS) -lm -lrt -o $@
@@ -734,6 +764,7 @@ clean:
 	rm -rf out/star6e out/maruko out/cv610
 	rm -f $(TIMING_PROBE_TARGET)
 	rm -f $(TEST_RUNNER)
+	rm -f $(TEST_RUNNER_WERROR) $(TEST_RUNNER_ASAN) $(TEST_RUNNER_TSAN)
 	rm -f $(CV610_VALIDATION_TEST)
 	rm -f $(QR_TEST_RUNNER)
 	rm -f $(QR_HOST_DECODE)

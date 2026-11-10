@@ -21,6 +21,7 @@
 #include "rtp_session.h"
 #include "rtp_sidecar.h"
 #include "timing.h"
+#include "frame_gate.h"
 #include "venc_frame_ring.h"
 #include "venc_ring.h"
 #include "venc_api.h"
@@ -124,6 +125,10 @@ typedef struct {
 	 * responsible for reacting. */
 	VencRingLowWater low_water;
 	int low_water_ready;
+	/* Adaptive frame gate over the single VENC channel.  See
+	 * include/frame_gate.h.  Armed automatically whenever the output is a
+	 * frame ring; the drain loop below is the actuator. */
+	FrameGate frame_gate;
 	/* Per-frame metadata channel (protocols/rtp-sidecar.md).  Bound once at
 	 * output start and closed unconditionally at output stop, like every
 	 * other CV610 resource: pipeline state here survives a respawn, so a
@@ -906,6 +911,75 @@ static int cv610_collect_transport(Cv610RunnerContext *ctx,
 	return 0;
 }
 
+/* CV610 wording for frame_gate_setup()'s verdict; the checks are shared in
+ * frame_gate.c so the three backends cannot drift. */
+static void cv610_report_frame_gate_setup(FrameGateSetupStatus st,
+	const FrameGate *g, uint32_t slot_count)
+{
+	switch (st) {
+	case FRAME_GATE_SETUP_NO_RING:
+		fprintf(stderr, "NOTE: [cv610] frame gate inert — this output "
+			"is not frame-shm, so it has no occupancy signal\n");
+		return;
+	case FRAME_GATE_SETUP_CLOSE_TOO_HIGH:
+		fprintf(stderr, "WARNING: frameGateCloseSlots %u exceeds the "
+			"ring's %u slots; gate can never close\n",
+			(unsigned)g->cfg.close_slots, (unsigned)slot_count);
+		return;
+	case FRAME_GATE_SETUP_READY:
+		printf("> frame gate on: close>=%u open<=%u escape=%ums "
+			"ring=%u slots\n",
+			(unsigned)g->cfg.close_slots, (unsigned)g->cfg.open_slots,
+			(unsigned)(g->cfg.max_closed_us / 1000u),
+			(unsigned)slot_count);
+		return;
+	}
+}
+
+/* Adaptive frame gate — the CV610 twin of star6e_service_frame_gate().  Same
+ * rationale (a bitrate write implicitly keyframes; stopping frame intake
+ * changes no encoder state) and the same signal, the instantaneous egress
+ * ring occupancy rather than the 200 ms low-water window.
+ *
+ * Called from the normal per-frame path AND from every branch of the stream
+ * loop that can be reached while the gate is closed — no frames are produced
+ * then, so the per-frame call never runs and a gate that cannot reopen is a
+ * hung stream. */
+static void cv610_service_frame_gate(Cv610RunnerContext *ctx)
+{
+	venc_frame_ring_fill_t fill;
+	uint64_t now_us;
+
+	if (!ctx || !frame_gate_enabled(&ctx->frame_gate))
+		return;
+
+	if (!ctx->frame_ring ||
+	    venc_frame_ring_get_fill(ctx->frame_ring, &fill) != 0) {
+		/* No SDK call: intake was never stopped, only the drain. */
+		if (!frame_gate_is_open(&ctx->frame_gate))
+			frame_gate_force_open(&ctx->frame_gate,
+				wb_monotonic_us());
+		return;
+	}
+
+	now_us = wb_monotonic_us();
+
+	/* CV610 records in mirror mode only (the loop above refuses every
+	 * other record.mode), so the recorder always shares this channel:
+	 * suppress closes while a recording runs rather than punching holes
+	 * in the file for a radio problem.  Reopens are never suppressed. */
+	if (frame_gate_is_open(&ctx->frame_gate) &&
+	    star6e_record_wants_frame(&ctx->ts_recorder, &ctx->recorder))
+		return;
+
+	/* The policy flip IS the actuator, so the returned action needs no
+	 * handling: the loop below stops pulling while the gate reads closed
+	 * and VENC's own output FIFO applies the backpressure.  Nothing is
+	 * issued to the SDK deliberately — stop_chn/start_chn emit an IRAP on
+	 * resume here too, measured at three per five cycles on this board. */
+	(void)frame_gate_observe(&ctx->frame_gate, fill.used_slots, now_us);
+}
+
 /* Star6E/Maruko parity — see star6e_service_ring_low_water().  venc measures
  * egress pressure and publishes it; it never acts on it.
  *
@@ -959,6 +1033,10 @@ static char *cv610_query_transport_status(void)
 	if (cv610_collect_transport(ctx, NULL, &ts) != 0)
 		return NULL;
 	if (ts.is_ring) {
+		char gate_json[FRAME_GATE_STATUS_JSON_CAP];
+
+		frame_gate_status_json(&ctx->frame_gate, wb_monotonic_us(),
+			gate_json, sizeof(gate_json));
 		pos = snprintf(buf, sizeof(buf),
 			"{\"ok\":true,\"data\":{"
 			"\"active\":true,\"transport\":\"frame-shm\","
@@ -966,7 +1044,7 @@ static char *cv610_query_transport_status(void)
 			"\"transportDrops\":%llu,\"pressureDrops\":%u,"
 			"\"framesSent\":%llu,\"oversizeDrops\":%llu,"
 			"\"slotCount\":%u,\"usedSlots\":%u,"
-			"\"ringLowWaterSlots\":%u,\"otherDrops\":%llu}}",
+			"\"ringLowWaterSlots\":%u,\"otherDrops\":%llu%s}}",
 			(unsigned)ts.fill_pct,
 			ts.in_pressure ? "true" : "false",
 			(unsigned long long)ts.transport_drops,
@@ -975,7 +1053,7 @@ static char *cv610_query_transport_status(void)
 			(unsigned long long)ts.oversize_drops,
 			(unsigned)ts.slot_count, (unsigned)ts.used_slots,
 			(unsigned)venc_ring_low_water_slots(&ctx->low_water),
-			(unsigned long long)ts.other_drops);
+			(unsigned long long)ts.other_drops, gate_json);
 	} else if (ts.active) {
 		pos = snprintf(buf, sizeof(buf),
 			"{\"ok\":true,\"data\":{"
@@ -1971,11 +2049,36 @@ static int cv610_venc_start(Cv610RunnerContext *ctx)
 	vui.vui_video_signal.matrix_coefficients = 1;
 	if (ss_mpi_venc_set_h265_vui(CV610_VENC_CHN, &vui) != TD_SUCCESS)
 		return -1;
+	/* Cap the bitstream buffer before encoding starts — see
+	 * FRAME_GATE_STREAM_BUF_FRAMES.  Read-modify-write: chn_param also
+	 * carries crop, frame rate and in_depth, none of which this owns.
+	 * Advisory: a refusal leaves the SDK default depth, which costs
+	 * latency while gated and nothing else. */
+	{
+		ot_venc_chn_param cp;
+
+		memset(&cp, 0, sizeof(cp));
+		if (ss_mpi_venc_get_chn_param(CV610_VENC_CHN, &cp)
+		    == TD_SUCCESS) {
+			cp.max_stream_cnt = FRAME_GATE_STREAM_BUF_FRAMES;
+			if (ss_mpi_venc_set_chn_param(CV610_VENC_CHN, &cp)
+			    != TD_SUCCESS)
+				fprintf(stderr, "WARNING: [cv610] "
+					"max_stream_cnt=%u refused; keeping "
+					"the SDK default depth\n",
+					FRAME_GATE_STREAM_BUF_FRAMES);
+		} else {
+			fprintf(stderr, "WARNING: [cv610] get_chn_param "
+				"failed; keeping the SDK default depth\n");
+		}
+	}
+
 	memset(&start, 0, sizeof(start));
 	start.recv_pic_num = -1;
 	if (ss_mpi_venc_start_chn(CV610_VENC_CHN, &start) != TD_SUCCESS)
 		return -1;
 	ctx->venc_started = 1;
+
 	source.mod_id = OT_ID_VPSS;
 	source.dev_id = CV610_VPSS_GRP;
 	source.chn_id = CV610_VPSS_CHN;
@@ -2253,6 +2356,21 @@ static int cv610_init(void *opaque)
 	}
 	if (cv610_output_start(ctx) != 0)
 		return -1;
+	/* Adaptive frame gate.  Output setup must run first: it creates the
+	 * frame-shm ring whose slot count enables the gate and validates the
+	 * configured close threshold.  Initialising this in cv610_venc_start()
+	 * made every CV610 frame-shm gate inert because ctx->frame_ring was
+	 * necessarily still NULL there. */
+	{
+		venc_frame_ring_fill_t gfill = {0};
+
+		if (ctx->frame_ring)
+			(void)venc_frame_ring_get_fill(ctx->frame_ring, &gfill);
+		cv610_report_frame_gate_setup(frame_gate_setup(&ctx->frame_gate,
+			ctx->config.video0.frame_gate_close_slots,
+			ctx->config.video0.frame_gate_max_closed_ms,
+			gfill.slot_count), &ctx->frame_gate, gfill.slot_count);
+	}
 	if (ctx->config.audio.enabled) {
 		/* Non-fatal, as on Star6E (star6e_pipeline.c discards the audio
 		 * init result): audio needs kernel modules the loader only stages
@@ -2441,7 +2559,12 @@ static int cv610_run(void *opaque)
 		ot_venc_chn_status status;
 		ot_venc_stream stream;
 		fd_set readfds;
-		struct timeval timeout = { 1, 0 };
+		/* 1 s normally; 2 ms while the gate is closed, where this
+		 * timeout would otherwise BE the reopen latency. */
+		struct timeval timeout =
+			frame_gate_is_open(&ctx->frame_gate)
+				? (struct timeval){ 1, 0 }
+				: (struct timeval){ 0, 2000 };
 		uint8_t *frame = NULL;
 		size_t frame_len = 0;
 		td_s32 ret;
@@ -2495,10 +2618,48 @@ static int cv610_run(void *opaque)
 		 * recvfrom and would otherwise clobber select's EINTR. */
 		if (ctx->sidecar.fd > 0)
 			rtp_sidecar_poll(&ctx->sidecar);
-		if (ready < 0 && select_errno == EINTR)
-			continue;
-		if (ready < 0)
+		/* Reopen path.  While the gate is closed no frame ever
+		 * arrives, so select() always times out and the per-frame
+		 * call below never runs — this is the only thing that can
+		 * let go again. */
+		cv610_service_frame_gate(ctx);
+		/* Gated: leave the encoded frame in VENC's output FIFO rather
+		 * than draining it.  The gate is serviced above, off the ring's
+		 * own occupancy, so the reopen path never depends on the
+		 * drain. */
+		/* A hard select() error is fatal whether or not the gate is
+		 * closed, and it does NOT consume the timeout — taking the
+		 * gated continue first would hot-spin until the escape. */
+		if (ready < 0 && select_errno != EINTR)
 			return -1;
+		if (!frame_gate_is_open(&ctx->frame_gate)) {
+			/* Gated: no frame is drained, but the ring's low-water
+			 * gauge is published unconditionally, so it must keep
+			 * being measured or it freezes for the whole closed
+			 * interval — hiding exactly the congestion that closed
+			 * the gate from waybeam-link's rate model.  Star6E and
+			 * Maruko service their low-water gauge in the gated
+			 * branch the same way.  Pass the reading through so the
+			 * transport switch resets the window exactly as the
+			 * per-frame path does when the ring read fails. */
+			venc_frame_ring_fill_t gfill;
+			const venc_frame_ring_fill_t *gfillp = NULL;
+
+			if (ctx->frame_ring &&
+			    venc_frame_ring_get_fill(ctx->frame_ring, &gfill) == 0)
+				gfillp = &gfill;
+			cv610_service_ring_low_water(ctx, gfillp);
+			/* The pressure flag is deliberately NOT advanced here:
+			 * venc_observe_pressure()'s counter counts frames in
+			 * pressure, and both other backends leave it frozen while
+			 * gated (their sampling is per-frame and, on Star6E,
+			 * subscription-gated).  Advancing it on this ~500 Hz idle
+			 * poll would inflate pressure_drops and diverge from the
+			 * wire. */
+			continue;
+		}
+		if (ready < 0)
+			continue;
 		if (ready == 0)
 			continue;
 		memset(&status, 0, sizeof(status));
@@ -2806,6 +2967,11 @@ static int cv610_run(void *opaque)
 		}
 		ret = ss_mpi_venc_release_stream(CV610_VENC_CHN, &stream);
 		free(stream.pack);
+
+		/* Keep the gate transition outside the acquired-stream lifetime on
+		 * every backend.  CV610 tolerated stop_chn before release, but the
+		 * shared ordering avoids depending on that vendor-specific accident. */
+		cv610_service_frame_gate(ctx);
 
 		/* A recorder that stopped ITSELF (disk full, write error) does
 		 * so on the writer thread, so nothing but this loop is

@@ -9,6 +9,7 @@
 #include "pipeline_common.h"
 #include "scene_detector.h"
 #include "sensor_select.h"
+#include "frame_gate.h"
 #include "star6e_recorder.h"
 #include "star6e_ts_recorder.h"
 #include "venc_rec_writer.h"
@@ -42,6 +43,9 @@ typedef struct {
   int bound_vpe_venc;
   int stream_started;
   MarukoOutput output;
+  /* Adaptive frame gate over the LIVE channel (venc_channel / chn 0).
+   * See include/frame_gate.h and the Star6E twin in star6e_pipeline.h. */
+  FrameGate frame_gate;
   volatile sig_atomic_t output_enabled;
   volatile uint32_t stored_fps;
   MI_VENC_DEV venc_device;

@@ -11,6 +11,7 @@
 #include "star6e_output.h"
 #include "star6e_runtime.h"
 #include "star6e_vpe_ports.h"
+#include "timing.h"
 #include "venc_api.h"
 #include "venc_jpeg.h"
 
@@ -690,7 +691,6 @@ static int compute_horizontal_roi(uint32_t width, uint32_t height,
 	roi->stRect.u32Height = band.height;
 	return 0;
 }
-
 
 static int apply_roi_qp(int qp)
 {
@@ -1618,10 +1618,13 @@ static char *query_transport_status(void)
 				&ps->output.bad_au_drops, __ATOMIC_RELAXED));
 	} else if (ps->output.frame_ring) {
 		venc_frame_ring_fill_t fill;
+		char gate_json[FRAME_GATE_STATUS_JSON_CAP];
 		int in_pressure;
 		if (venc_frame_ring_get_fill(ps->output.frame_ring, &fill) != 0)
 			return NULL;
 		in_pressure = fill.fill_pct >= VENC_PRESSURE_HIGH_WATER_PCT;
+		frame_gate_status_json(&ps->frame_gate, wb_monotonic_us(),
+			gate_json, sizeof(gate_json));
 		pos = snprintf(buf, sizeof(buf),
 			"{\"ok\":true,\"data\":{"
 			"\"active\":true,"
@@ -1636,7 +1639,7 @@ static char *query_transport_status(void)
 			"\"usedSlots\":%u,"
 			"\"ringLowWaterSlots\":%u,"
 			"\"otherDrops\":%llu,"
-			"\"badAuDrops\":%llu}}",
+			"\"badAuDrops\":%llu%s}}",
 			transport,
 			(unsigned)fill.fill_pct,
 			in_pressure ? "true" : "false",
@@ -1649,7 +1652,8 @@ static char *query_transport_status(void)
 			(unsigned)venc_ring_low_water_slots(&ps->output.low_water),
 			(unsigned long long)fill.other_drops,
 			(unsigned long long)__atomic_load_n(
-				&ps->output.bad_au_drops, __ATOMIC_RELAXED));
+				&ps->output.bad_au_drops, __ATOMIC_RELAXED),
+			gate_json);
 	} else if ((ps->output.transport == VENC_OUTPUT_URI_UNIX ||
 	            ps->output.transport == VENC_OUTPUT_URI_UDP) &&
 	           ps->output.socket_handle >= 0) {
