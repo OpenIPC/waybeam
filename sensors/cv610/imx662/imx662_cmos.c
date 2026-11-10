@@ -167,6 +167,13 @@ static td_void cmos_fps_set(ot_vi_pipe vi_pipe, td_float fps, ot_isp_ae_sensor_d
 	ae_sns_dft->fps            = fps;
 	ae_sns_dft->full_lines_std = sns_state->fl_std;
 	ae_sns_dft->max_int_time   = sns_state->fl_std - IMX662_MIN_SHR0_LINEAR;
+	/* The running frame length follows the new rate too: cmos_inttime_update()
+	 * computes SHR0 against fl[0], so a stale one offsets exposure by the
+	 * frame-length change once VMAX has moved.  Bring-up publishes each mode's
+	 * own rate, so only a runtime ISP frame-rate change reaches this with a
+	 * new one. */
+	sns_state->fl[0]           = sns_state->fl_std;
+	ae_sns_dft->full_lines     = sns_state->fl[0];
 	cmos_config_vmax(sns_state, vmax);
 }
 
@@ -653,29 +660,41 @@ static td_s32 sensor_register_callback(ot_vi_pipe vi_pipe, ot_isp_3a_alg_lib *ae
 	ret = ot_mpi_ae_sensor_reg_callback(vi_pipe, ae_lib, &sns_attr_info, &ae_register);
 	if (ret != TD_SUCCESS) {
 		isp_err_trace("IMX662: ae sensor reg callback failed!\n");
-		return ret;
+		goto fail_isp;
 	}
 
 	cmos_init_awb_exp_function(awb_exp_func);
 	ret = ot_mpi_awb_sensor_reg_callback(vi_pipe, awb_lib, &sns_attr_info, &awb_register);
 	if (ret != TD_SUCCESS) {
 		isp_err_trace("IMX662: awb sensor reg callback failed!\n");
-		return ret;
+		goto fail_ae;
 	}
 	return TD_SUCCESS;
+
+	/* Undo what did register, so a retried bring-up does not find this
+	 * sensor id half-registered with the ISP or AE. */
+fail_ae:
+	(td_void)ot_mpi_ae_sensor_unreg_callback(vi_pipe, ae_lib, IMX662_ID);
+fail_isp:
+	(td_void)ot_mpi_isp_sensor_unreg_callback(vi_pipe, IMX662_ID);
+	return ret;
 }
 
 static td_s32 sensor_unregister_callback(ot_vi_pipe vi_pipe, ot_isp_3a_alg_lib *ae_lib,
 										 ot_isp_3a_alg_lib *awb_lib)
 {
-	td_s32 ret;
+	td_s32 ret_isp, ret_ae, ret_awb;
+
 	sns_check_pointer_return(ae_lib);
 	sns_check_pointer_return(awb_lib);
 
-	ret  = ot_mpi_isp_sensor_unreg_callback(vi_pipe, IMX662_ID);
-	ret += ot_mpi_ae_sensor_unreg_callback(vi_pipe, ae_lib, IMX662_ID);
-	ret += ot_mpi_awb_sensor_unreg_callback(vi_pipe, awb_lib, IMX662_ID);
-	return (ret != TD_SUCCESS) ? TD_FAILURE : TD_SUCCESS;
+	/* Tested apart, not summed: after a failed registration has already
+	 * unwound, all three fail with 0xA0xxxxxx codes whose sum overflows. */
+	ret_isp = ot_mpi_isp_sensor_unreg_callback(vi_pipe, IMX662_ID);
+	ret_ae  = ot_mpi_ae_sensor_unreg_callback(vi_pipe, ae_lib, IMX662_ID);
+	ret_awb = ot_mpi_awb_sensor_unreg_callback(vi_pipe, awb_lib, IMX662_ID);
+	return (ret_isp != TD_SUCCESS || ret_ae != TD_SUCCESS ||
+			ret_awb != TD_SUCCESS) ? TD_FAILURE : TD_SUCCESS;
 }
 
 static td_s32 sensor_set_init(ot_vi_pipe vi_pipe, ot_isp_init_attr *init_attr)
