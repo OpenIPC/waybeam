@@ -29,6 +29,12 @@ It is therefore a **snapshot for posterity and a restore point**, not a
 measured tune. Nobody has run PQTools against this sensor. Re-exporting after
 real tuning work is the whole point of keeping the exporter.
 
+It also predates 0.84.1, which moved the plugin's ISP black level from 200 to
+800 (`IMX662_BLACK_LEVEL`). The snapshot carries the old 200, so importing it
+puts that back — and with it the blue lift the change is meant to remove.
+Re-export it from a craft running 0.84.1 or later before treating it as the
+plugin's cold-boot state again.
+
 One consequence worth knowing: an export is taken from a *live* ISP, so it
 captures wherever the 3A loops had converged at that moment. Two exports of
 the same craft are not byte-identical, and neither is an export taken right
