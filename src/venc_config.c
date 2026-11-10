@@ -4,6 +4,7 @@
 #include "pipeline_common.h"
 #include "star6e_recorder.h"
 #include "intra_refresh.h"
+#include "frame_gate.h"
 #include "../lib/cJSON.h"
 
 #include <errno.h>
@@ -179,6 +180,11 @@ void venc_config_defaults(VencConfig *cfg)
 
 	/* H.265 multi-slice split (video0, all encoder backends) — 1 = off */
 	cfg->video0.slice_count = 1;
+
+	/* Adaptive frame gate (video0) — off by default; 0 selects the
+	 * frame_gate.h defaults for both knobs. */
+	cfg->video0.frame_gate_close_slots = 0;
+	cfg->video0.frame_gate_max_closed_ms = 0;
 
 	/* intra refresh (video0) — disabled by default; mode-driven */
 	safe_strcpy(cfg->video0.intra_refresh_mode,
@@ -660,6 +666,22 @@ static void load_video0(const cJSON *root, VencConfigVideo *v)
 		if (sc < 1) sc = 1;
 		if (sc > VENC_SLICE_COUNT_MAX) sc = VENC_SLICE_COUNT_MAX;
 		v->slice_count = (uint32_t)sc;
+	}
+
+	/* Adaptive frame gate thresholds.  The gate itself has no switch — it
+	 * arms on any frame-shm transport; these only tune it. */
+	{
+		/* Clamp in signed space so a negative cannot wrap to a huge
+		 * unsigned; 0 means "use the frame_gate.h default". */
+		int cs = json_get_int(obj, "frameGateCloseSlots",
+			(int)v->frame_gate_close_slots);
+		if (cs < 0) cs = 0;
+		v->frame_gate_close_slots = (uint32_t)cs;
+
+		int mc = json_get_int(obj, "frameGateMaxClosedMs",
+			(int)v->frame_gate_max_closed_ms);
+		if (mc < 0) mc = 0;
+		v->frame_gate_max_closed_ms = (uint32_t)mc;
 	}
 
 	/* Resilience preset is the sole driver of intra-refresh + SVC-T
@@ -1429,6 +1451,10 @@ static void render_video0(PrettyBuf *p, const VencConfig *cfg, int is_last)
 	pp_field_uint(p,   2, "sceneThreshold", cfg->video0.scene_threshold, 0);
 	pp_field_uint(p,   2, "sceneHoldoff",   cfg->video0.scene_holdoff,   0);
 	pp_field_uint(p,   2, "sliceCount",     cfg->video0.slice_count,     0);
+	pp_field_uint(p,   2, "frameGateCloseSlots",
+		cfg->video0.frame_gate_close_slots, 0);
+	pp_field_uint(p,   2, "frameGateMaxClosedMs",
+		cfg->video0.frame_gate_max_closed_ms, 0);
 	pp_field_string(p, 2, "resilience",        cfg->video0.resilience,          0);
 	pp_field_uint(p,   2, "intraRefreshQp", cfg->video0.intra_refresh_qp, 0);
 	pp_field_double(p, 2, "zoomX",             cfg->video0.zoom_x,              0);
@@ -1685,6 +1711,10 @@ static cJSON *config_to_cjson(const VencConfig *cfg)
 		cJSON_AddNumberToObject(vid, "sceneThreshold", cfg->video0.scene_threshold);
 		cJSON_AddNumberToObject(vid, "sceneHoldoff", cfg->video0.scene_holdoff);
 		cJSON_AddNumberToObject(vid, "sliceCount", cfg->video0.slice_count);
+		cJSON_AddNumberToObject(vid, "frameGateCloseSlots",
+			cfg->video0.frame_gate_close_slots);
+		cJSON_AddNumberToObject(vid, "frameGateMaxClosedMs",
+			cfg->video0.frame_gate_max_closed_ms);
 		cJSON_AddStringToObject(vid, "resilience", cfg->video0.resilience);
 		cJSON_AddNumberToObject(vid, "intraRefreshQp",
 			cfg->video0.intra_refresh_qp);

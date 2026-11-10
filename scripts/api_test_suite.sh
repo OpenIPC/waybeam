@@ -481,6 +481,21 @@ else
 	fail "GET /api/v1/capabilities" "${resp}"
 fi
 
+# CV610 parity: the adaptive frame gate is wired in cv610_runtime.c, so its two
+# tunables must advertise supported=true.  A regression here greys the controls
+# while a hand-edited config is still honoured.  Read-only, safe on any bench.
+if [[ "${BACKEND_NAME}" == "cv610" ]] && ok_field "${resp}"; then
+	for gate_key in video0.frame_gate_close_slots video0.frame_gate_max_closed_ms; do
+		gate_sup="$(echo "${resp}" | python3 -c "import sys,json; f=json.load(sys.stdin)['data']['fields']; print(f.get('${gate_key}', {}).get('supported', 'missing'))" 2>/dev/null)" || gate_sup="parse-error"
+		if [[ "${gate_sup}" == "True" ]]; then
+			pass "capabilities: ${gate_key} supported on cv610"
+		else
+			fail "capabilities: ${gate_key} supported on cv610" \
+				"supported=${gate_sup}; see documentation/REVIEW_FIX_VERIFICATION.md"
+		fi
+	done
+fi
+
 # ════════════════════════════════════════════════════════════════════════
 section "2. FULL CONFIG RETRIEVAL"
 # ════════════════════════════════════════════════════════════════════════

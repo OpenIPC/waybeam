@@ -10,6 +10,7 @@
 
 #include "cv610_pipeline.h"
 #include "file_util.h"
+#include "cv610_pq_bin_load.h"
 
 #include <dlfcn.h>
 #include <stdio.h>
@@ -188,49 +189,6 @@ static void pq_tuning_end(td_s32 saved)
 		(void)ss_mpi_sys_set_tuning_connect(0);
 }
 
-static unsigned char *pq_read_file(const char *path, size_t *out_len)
-{
-	unsigned char *buf;
-	long size;
-	FILE *f;
-
-	f = fopen(path, "rb");
-	if (!f) {
-		fprintf(stderr, "WARNING: %scannot open %s\n", PQ_LOG, path);
-		return NULL;
-	}
-	if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) < 0 ||
-		fseek(f, 0, SEEK_SET) != 0) {
-		fprintf(stderr, "WARNING: %scannot size %s\n", PQ_LOG, path);
-		fclose(f);
-		return NULL;
-	}
-	if ((unsigned long)size > PQ_BIN_MAX_BYTES) {
-		fprintf(stderr, "WARNING: %s%s is %ld bytes, over the %u byte cap\n",
-			PQ_LOG, path, size, PQ_BIN_MAX_BYTES);
-		fclose(f);
-		return NULL;
-	}
-
-	buf = malloc((size_t)size);
-	if (!buf) {
-		fprintf(stderr, "WARNING: %scannot allocate %ld bytes for %s\n",
-			PQ_LOG, size, path);
-		fclose(f);
-		return NULL;
-	}
-	if (fread(buf, 1, (size_t)size, f) != (size_t)size) {
-		fprintf(stderr, "WARNING: %sshort read on %s\n", PQ_LOG, path);
-		free(buf);
-		fclose(f);
-		return NULL;
-	}
-	fclose(f);
-
-	*out_len = (size_t)size;
-	return buf;
-}
-
 int cv610_pq_bin_available(void)
 {
 	/* Deliberately narrower than pq_lib_open(): this only answers "is the blob
@@ -294,7 +252,7 @@ int cv610_pq_bin_import(const char *path)
 	if (pq_lib_open(&lib) != 0)
 		return -1;
 
-	buf = pq_read_file(path, &len);
+	buf = cv610_pq_bin_load(path, PQ_BIN_MAX_BYTES, &len);
 	if (!buf) {
 		pq_lib_close(&lib);
 		return -1;
@@ -324,12 +282,20 @@ int cv610_pq_bin_import(const char *path)
 
 	/* Gate the 3DNR half on the section length the library itself expects.
 	 * A header-size check is not enough: ImportNRXData does not forward our
-	 * length to PQ_BIN_SetNRDataV2, which memcpy's a fixed ~1298-byte payload
+	 * length to PQ_BIN_SetNRDataV2, which memcpy's a fixed 1298-byte payload
 	 * out of the buffer and only compares the declared size AFTERWARDS.  So a
 	 * validly-headed but truncated file -- an interrupted scp, a full tmpfs --
 	 * would read past the end of this allocation and push uninitialised heap
 	 * into the 3DNR registers.  Asking the library for the size is the same
 	 * authority we already trust for the ISP half.
+	 *
+	 * That answer is a gate, not a bound: the reader's interior offset grows
+	 * with a per-file count, so its fixed copy can reach
+	 * CV610_PQ_NRX_VENDOR_MAX bytes from the section while the library reports
+	 * only 1350.  cv610_pq_bin_load() therefore sizes the buffer for the
+	 * reader's worst case, not the file, and the slack is zeroed.  The gate
+	 * below stays as it was -- the file-size check must not be tightened on
+	 * the reader's internal layout, or valid tunes are refused.
 	 *
 	 * Skipping the section rather than letting the library refuse it is
 	 * deliberate: its refusal is the return value of the WHOLE call and would
@@ -418,7 +384,8 @@ int cv610_pq_bin_export(const char *path)
 	 * different field value than the sizer does, and on a path this chip does
 	 * not take it would emit up to 1410 bytes into a 1350-byte region.  The
 	 * length argument must stay exact (the check is a != , not a <=), so the
-	 * only place to absorb that is the allocation. */
+	 * only place to absorb that is the allocation.  The worst-case overhang
+	 * is 1410 - 1350 = 60 bytes, inside PQ_EXPORT_SLACK (64). */
 	buf = calloc(1, (size_t)need + PQ_EXPORT_SLACK);
 	if (!buf) {
 		fprintf(stderr, "WARNING: %scannot allocate %u bytes for export\n",

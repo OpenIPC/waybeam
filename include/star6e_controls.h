@@ -26,6 +26,9 @@ int star6e_controls_apply_roi_qp(int qp);
 /** Apply relative I/P QP delta to the running encoder. */
 int star6e_controls_apply_qp_delta(int delta);
 
+
+
+
 /** Service a pending detector live model-swap request on the pipeline thread.
  *  Called once per encode-loop iteration; a no-op when no swap is pending. */
 void star6e_controls_service_detect_reload(void);

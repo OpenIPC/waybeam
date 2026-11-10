@@ -88,6 +88,7 @@ typedef struct {
 	int (*fnGetChnAttr)(int chn, void *attr);
 	int (*fnSetChnAttr)(int chn, void *attr);
 	int (*fnRequestIdr)(int chn, int instant);
+	int (*fnSetMaxStreamCnt)(int chn, uint32_t cnt);
 	int (*fnSetRoiCfg)(int chn, void *cfg);
 	int (*fnGetRoiCfg)(int chn, uint32_t idx, void *cfg);
 	int (*fnGetRcParam)(int chn, void *param);

@@ -37,6 +37,7 @@ extern int test_idr_rate_limit(void);
 extern int test_backend(void);
 extern int test_debug_osd(void);
 extern int test_intra_refresh(void);
+extern int test_frame_gate(void);
 extern int test_venc_jpeg(void);
 extern int test_mdns_beacon(void);
 extern int test_framing_kalman(void);
@@ -48,6 +49,7 @@ extern int test_detect_wire(void);
 extern int test_star6e_vpe_ports(void);
 extern int test_maruko_scl_ports(void);
 extern int test_qr_scan(void);
+extern int test_cv610_pq_bin_load(void);
 
 int main(void)
 {
@@ -147,6 +149,9 @@ int main(void)
 	printf("\n--- test_intra_refresh ---\n");
 	failures += test_intra_refresh();
 
+	printf("\n--- test_frame_gate ---\n");
+	failures += test_frame_gate();
+
 	printf("\n--- test_venc_jpeg ---\n");
 	failures += test_venc_jpeg();
 
@@ -176,6 +181,10 @@ int main(void)
 
 	printf("\n--- test_maruko_scl_ports ---\n");
 	failures += test_maruko_scl_ports();
+
+	printf("\n--- test_cv610_pq_bin_load ---\n");
+	failures += test_cv610_pq_bin_load();
+
 	failures += test_qr_scan();
 
 	printf("\n=== Results: %d passed, %d failed ===\n",

@@ -279,6 +279,9 @@ static int i6e_venc_load(star6e_venc_impl *venc)
 		int (*)(int, void *), "MI_VENC_SetChnAttr");
 	LOAD_SYM(venc, "libmi_venc.so", fnRequestIdr,
 		int (*)(int, int), "MI_VENC_RequestIdr");
+	/* Optional: absent on older libmi_venc.so, so callers handle -1. */
+	LOAD_SYM(venc, "libmi_venc.so", fnSetMaxStreamCnt,
+		int (*)(int, uint32_t), "MI_VENC_SetMaxStreamCnt");
 	LOAD_SYM(venc, "libmi_venc.so", fnSetRoiCfg,
 		int (*)(int, void *), "MI_VENC_SetRoiCfg");
 	LOAD_SYM(venc, "libmi_venc.so", fnGetRoiCfg,
