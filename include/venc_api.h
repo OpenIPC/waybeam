@@ -7,7 +7,7 @@
  * and fails if they drift.  0.73.0 shipped with the document on 0.22.0 and the
  * code still answering 0.21.0, so every craft advertised a contract it was not
  * serving. */
-#define VENC_CONTRACT_VERSION "0.31.0"
+#define VENC_CONTRACT_VERSION "0.32.0"
 #include "venc_config.h"
 
 #ifdef __cplusplus

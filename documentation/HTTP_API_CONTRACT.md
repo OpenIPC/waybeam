@@ -18,7 +18,7 @@
   - `read_only` — cannot be changed via API.
 
 ## Contract Version
-- `contract_version`: `0.31.0`
+- `contract_version`: `0.32.0`
 - `status`: `active`
 
 ## Per-Backend Field Support
@@ -32,6 +32,7 @@
 | `video0.qpDelta` | true | true | **false** |
 | `video0.minQp` / `maxQp` | true | true | true |
 | `video0.intraRefreshQp` | **false** | **false** | true |
+| `video0.frameGateCloseSlots` / `frameGateMaxClosedMs` | true | true | true (**from 0.85.4**) |
 | `outgoing.sidecarPort` | true | true | true (**from 0.74.0**) |
 | `image.mirror` / `image.flip` | true | true | true (**from 0.75.0**) |
 | `image.rotate` | true | true | **false** |
@@ -107,8 +108,8 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.85.1",
-    "contract_version": "0.31.0",
+    "app_version": "0.86.1",
+    "contract_version": "0.32.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
   }
@@ -133,7 +134,7 @@ Response `200`:
       "sensor": { "index": -1, "mode": -1 },
       "isp": { "sensorBin": "/etc/sensors/imx415_greg_fpvXVIII-gpt200.bin", "aeEngine": "sdk", "aeFps": 15, "gainMax": 0, "awbMode": "auto", "awbCt": 5500, "keepAspect": true },
       "image": { "mirror": false, "flip": false, "rotate": 0 },
-      "video0": { "rcMode": "cbr", "fps": 90, "size": "auto", "bitrate": 8192, "gopSize": 1.0, "qpDelta": 0, "sceneThreshold": 0, "sceneHoldoff": 2, "sliceCount": 1, "resilience": "off", "intraRefreshQp": 0, "zoomX": 0.5, "zoomY": 0.5, "framing": "off" },
+      "video0": { "rcMode": "cbr", "fps": 90, "size": "auto", "bitrate": 8192, "gopSize": 1.0, "qpDelta": 0, "sceneThreshold": 0, "sceneHoldoff": 2, "sliceCount": 1, "resilience": "off", "intraRefreshQp": 0, "zoomX": 0.5, "zoomY": 0.5, "framing": "off", "frameGateCloseSlots": 3, "frameGateMaxClosedMs": 500 },
       "outgoing": { "enabled": true, "server": "udp://192.168.2.20:5600", "streamMode": "rtp", "maxPayloadSize": 1400, "connectedUdp": false, "allowUnixEncoderStall": false },
       "fpv": { "roiEnabled": false, "roiQp": -20, "roiSteps": 2, "roiCenter": 0.4, "noiseLevel": 0 },
       "record": { "enabled": false, "mode": "off", "dir": "/tmp/sdcard", "format": "ts", "maxSeconds": 300, "maxMB": 500 },
@@ -1593,7 +1594,11 @@ Response `200` (frame-shm ring):
     "usedSlots": 2,
     "ringLowWaterSlots": 1,
     "otherDrops": 0,
-    "badAuDrops": 0
+    "badAuDrops": 0,
+    "gateClosed": false,
+    "gateCloseEvents": 0,
+    "gateEscapeEvents": 0,
+    "gateClosedMs": 0
   }
 }
 ```
@@ -1610,7 +1615,11 @@ Response `200` (UDP/Unix kernel-buffer fill_pct):
     "pressureDrops": 0,
     "transportDrops": 0,
     "packetsSent": 184523,
-    "badAuDrops": 0
+    "badAuDrops": 0,
+    "gateClosed": false,
+    "gateCloseEvents": 0,
+    "gateEscapeEvents": 0,
+    "gateClosedMs": 0
   }
 }
 ```
@@ -1634,6 +1643,10 @@ Field reference:
 | `oversizeDrops` | (SHM only) Frames rejected for exceeding slot capacity |
 | `slotCount` / `usedSlots` | (SHM only) Ring sizing; `usedSlots` is a snapshot |
 | `otherDrops` | (frame-shm only, all three backends) Frames the producer discarded for a reason **other than a full ring** — an access unit it could not build at all (oversize, or a malformed SDK packet table).  Kept apart from `transportDrops` on purpose: that one is congestion the consumer is causing and a rate controller should slow down for it, this one is not congestion and slowing down fixes nothing.  Mirrored into the ring header at offset 96 so the consumer sees it too |
+| `gateClosed` | Adaptive frame gate state right now. `true` means the backend is not draining the encoder's output FIFO because the egress ring is backed up. **frame-shm only** — the gate arms itself on a frame ring and nothing else, so these four fields are absent on every other transport |
+| `gateCloseEvents` | Gate closes since bring-up. A steadily climbing count under load is normal — that is the gate doing its job |
+| `gateEscapeEvents` | Reopens forced by the `frameGateMaxClosedMs` safety escape rather than by the consumer draining. Climbing on its own means the consumer is dead or wedged, not merely slow, and `transportDrops` should be climbing with it |
+| `gateClosedMs` | Cumulative time gated, including the interval in progress. Against `t_ms` this is the duty cycle |
 | `badAuDrops` | Access units discarded because the SDK's packet table was incomplete or invalid.  Transport-independent — this happens on RTP as well — and a subset of `otherDrops` on `frame-shm`.  **Star6E and Maruko only:** the CV610 stream path has no packet-table validation, so the field is absent there rather than reported as a permanent zero |
 | `ringLowWaterSlots` | (frame-shm only, all three backends) Lowest ring occupancy reached in the last 200 ms window, **in slots**.  `<= 1` is the healthy band and `>= 2` sustained is standing backlog — venc samples just after writing, so a consumer that is keeping up still leaves exactly one frame queued.  Raw slots rather than a fraction of `slotCount`, because whether a fraction round-trips that 1 depends on the geometry — at the 8 slots venc creates it does (125 permille exactly), at 16 it does not (62.5 truncates to 62, back to 0: a healthy ring indistinguishable from a drained one) — and the header does not fix `slotCount`.  A **measurement, not an actuator** — venc publishes it and changes nothing in response |
 
@@ -1985,6 +1998,14 @@ in Notes. As of `contract_version: 0.29.0`:
 | `isp.aeEngine` ("sdk" only) | applied | applied | Unified AE selector landed in 0.10.13.  `custom` (userspace AE governor) is RETIRED — Maruko in 0.22.0, Star6E in 0.47.0 — and the value was **removed** in 0.47.0.  `sdk` is the only accepted value; any other (e.g. a stale `custom`) warns and falls back to `sdk`.  Both backends run the SDK firmware/bin AE for convergence plus a supervisory thread that enforces the `isp.gain*`/`isp.shutter*` limits.  CV610 has no such thread and reports `isp.aeEngine` unsupported: its ISP owns AE outright, and the two ceilings it does honour are written straight into `ot_isp_exposure_attr.auto_attr` instead. |
 
 ## Change Log (Contract)
+- `0.32.0` (breaking — the adaptive frame gate loses its switch, frame-shm
+  transport status gains gate fields; from venc 0.85.0): removes the
+  `video0.frameGate` switch — `GET /api/v1/set` now rejects it and
+  `/api/v1/config` no longer carries it. `GET /api/v1/transport/status` gains
+  `gateClosed`, `gateCloseEvents`, `gateEscapeEvents` and `gateClosedMs` on
+  frame-shm outputs. Two restart-required `video0` fields remain —
+  `frameGateCloseSlots` and `frameGateMaxClosedMs` — and CV610 advertises them
+  from venc 0.85.4.
 - `0.29.0` (additive — CV610 gains PQTools `.bin` import and export):
     Adds `GET /api/v1/iq/export_bin`, which writes the live ISP state to a
     PQTools `.bin` at the fixed path `/tmp/isp_export.bin` and answers

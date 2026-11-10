@@ -1520,6 +1520,15 @@ static int star6e_pipeline_start_venc(uint32_t width, uint32_t height,
 		       (ctu_rows + ctu_per - 1) / ctu_per);
 	}
 
+	/* Cap the bitstream buffer before encoding starts — see
+	 * FRAME_GATE_STREAM_BUF_FRAMES.  Advisory: an older libmi_venc.so
+	 * without the symbol, or a refusal, just leaves the SDK default of 3,
+	 * which costs latency while gated but nothing else. */
+	if (MI_VENC_SetMaxStreamCnt(*chn, FRAME_GATE_STREAM_BUF_FRAMES) != 0)
+		fprintf(stderr, "WARNING: SetMaxStreamCnt(%u) refused; "
+			"keeping the SDK default depth\n",
+			FRAME_GATE_STREAM_BUF_FRAMES);
+
 	ret = MI_VENC_StartRecvPic(*chn);
 	if (ret != 0) {
 		fprintf(stderr, "ERROR: MI_VENC_StartRecvPic failed %d\n", ret);

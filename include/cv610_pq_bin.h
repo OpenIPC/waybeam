@@ -25,9 +25,9 @@
  * with cv610_pq_bin_export(), and treat them as opaque. */
 
 /** Whether the vendor library is present and loadable on this craft.
- *  Probed once and cached.  Both entry points below degrade to a warning
- *  without it, so this exists to keep /api/v1/capabilities honest rather than
- *  to gate the calls. */
+ *  Probed on demand, never cached: both entry points below degrade to a
+ *  warning without it, so this exists to keep /api/v1/capabilities honest
+ *  rather than to gate the calls. */
 int cv610_pq_bin_available(void);
 
 /** Import a PQTools `.bin` into the running ISP.

@@ -11,6 +11,7 @@
 #include "star6e_ts_recorder.h"
 #include "venc_rec_writer.h"
 #include "star6e_video.h"
+#include "frame_gate.h"
 #include "venc_config.h"
 
 #include <pthread.h>
@@ -58,6 +59,12 @@ typedef struct {
 	int bound_vif_vpe;
 	int bound_vpe_venc;
 	Star6eOutput output;
+	/* Adaptive frame gate over the STREAM channel (venc_channel / ch0).
+	 * Lives on the pipeline state, not the output, because the actuator
+	 * is the VENC channel while the signal is the output's ring — and
+	 * because a reinit must re-open the gate before the channel goes
+	 * away. */
+	FrameGate frame_gate;
 	Star6eVideoState video;
 	uint32_t image_width;
 	uint32_t image_height;

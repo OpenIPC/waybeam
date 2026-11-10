@@ -1,6 +1,6 @@
 # History
 
-## [0.85.1] - 2026-11-10
+## [0.86.1] - 2026-11-10
 
 The kernel half of the CV610 sensor chain now lives here too, so 1080p100 is
 buildable from this tree rather than only from the snokvist/firmware
@@ -22,11 +22,11 @@ package that carried it.
   OpenIPC `hisilicon-hi3516cv6xx` kernel, so the patch cannot silently stop
   applying.
 
-## [0.85.0] - 2026-11-10
+## [0.86.0] - 2026-11-10
 
 **CV610 drives a Sony IMX335 as well as the IMX662**, chosen from the u-boot
-`sensor` name. No config field, no API change: `contract_version` stays
-**0.31.0**. Built from DmtryJS's OpenIPC/waybeam#126 and #127, cut down to what
+`sensor` name. No config field, no API change: `contract_version` is
+unchanged. Built from DmtryJS's OpenIPC/waybeam#126 and #127, cut down to what
 this tree needs now that the IMX335 driver lives in OpenIPC/openhisilicon.
 
 - **`$SENSOR` picks the plugin, the ISP sensor id and the mode table.** It is
@@ -66,7 +66,7 @@ this tree needs now that the IMX335 driver lives in OpenIPC/openhisilicon.
   DmtryJS on a Hi3516CV610 + IMX335 under a stock OpenIPC image's loader and
   memory layout, with the #126/#127 code.
 
-## [0.84.1] - 2026-11-10
+## [0.85.7] - 2026-11-10
 
 The CV610 IMX662 plugin takes the fixes its OpenHisilicon copy gained in
 review (OpenIPC/openhisilicon#282 vendored it), and keeps what makes this the
@@ -94,6 +94,323 @@ whole-chain copy: **1080p100 stays**, on the 27 MHz clock the daemon selects.
   binary on musl, where libm is part of libc).
 - Not taken from upstream: its refusal of 100 fps, which assumes the stock
   37.125 MHz sys_config clock.
+
+## [0.85.6] - 2026-09-14
+
+Follow-ups to the two-week adversarial review: four behavioural fixes its
+first pass missed, plus two build-gate traps. No contract change —
+`contract_version` stays **0.32.0**.
+
+- **CV610's gated loop froze the egress ring's low-water gauge.** While the
+  frame gate was closed the drain loop `continue`d before
+  `cv610_service_ring_low_water()`, so the 200 ms `low_water_slots` export
+  waybeam-link's rate model reads held its last value for the whole closed
+  interval (up to `frameGateMaxClosedMs`, 60 s) — hiding exactly the
+  congestion that closed the gate. The gated branch now reads the ring fill
+  and services the gauge, matching Star6E and Maruko. The latched pressure
+  flag is deliberately left frozen: `venc_observe_pressure()` counts frames in
+  pressure, and both other backends sample it per-frame (and, on Star6E, only
+  under a sidecar subscription), so advancing it on the ~500 Hz idle poll
+  would inflate `pressure_drops`.
+- **The two frame-gate knobs were validated only on the live API path.**
+  `frameGateCloseSlots` / `frameGateMaxClosedMs` carry 0-64 / 0-60000 rules in
+  `validate_field_cfg()`, but the keys were missing from
+  `venc_api_validate_loaded_config()`'s sweep, so a config FILE could carry any
+  `uint32`. `frameGateMaxClosedMs = 4294968` then wrapped the `*1000` in
+  `frame_gate_resolve()` to 704 µs, which the debounce floor raised to 20 ms,
+  making the safety escape fire almost immediately. Both keys are now in the
+  sweep and the multiply saturates in 64 bits. Covered by `test_frame_gate`
+  and `test_venc_api`.
+- **Maruko kept the SDK's 3-deep bitstream buffer under `framing=stab-fill`.**
+  The `SetMaxStreamCnt(FRAME_GATE_STREAM_BUF_FRAMES)` call sat below the
+  `g_stab_fill_graph` early return, so the stab-fill path never capped it —
+  contradicting 0.85.0's "all three backends". The cap now runs before the
+  early return, so both `StartRecvPic` paths get it.
+- **A drained reopen at the backstop deadline was counted as a safety
+  escape.** With `max_closed_ms` at or below the 20 ms debounce the two
+  deadlines coincide, and the escape test ran first, so a normal drain reopen
+  incremented `gateEscapeEvents` and armed a spurious pulse. The normal drain
+  reopen is now evaluated before the escape.
+- **`make test-werror` compiled nothing.** Its `-Werror` lived in a
+  target-specific `HOST_CFLAGS` with no prerequisite that forced a rebuild, so
+  once `tests/test_runner` existed the target only re-ran the non-werror
+  binary — a false green of the same class 0.85.2/0.85.3 set out to close.
+- **`test-asan`/`test-tsan` overwrote the normal test binary.** Compiling each
+  variant to `tests/test_runner` left the last instrumented build behind, so a
+  later `make test` ran it. Each now builds a distinct
+  `tests/test_runner.{werror,asan,tsan}`.
+- **Verified the CV610 `.bin` import bound, and documented the export
+  slack.** Disassembling `libbin.so` confirmed `PQ_BIN_SetNRDataV2` rejects any
+  NRX count outside [1,16] before its fixed 1298-byte copy, so the 1410-byte
+  reader reach the 0.85.4 loader sizes for is a true ceiling, not an
+  assumption. The export side's 64-byte slack already covers the vendor's
+  60-byte overhang.
+
+## [0.85.5] - 2026-09-13
+
+Documentation-only follow-up to 0.85.4. No contract change —
+`contract_version` stays **0.32.0**.
+
+- **Corrected the hardware verification runbook** in
+  `documentation/REVIEW_FIX_VERIFICATION.md` after the 0.85.4 fixes were
+  exercised on the benches (CV610 `192.168.2.181`, Maruko `192.168.2.233`).
+  All three findings passed; the run record is now in the doc and six
+  procedure inaccuracies are fixed: the HTTP API takes one field per request
+  (a combined query is 400), each restart-class set needs its own request and
+  a settle, `record/start?dir=` requires the target directory to exist, the
+  patched count=16 `.bin` is refused with HTTP 500 rather than imported, the
+  gate reopens at `frameGateMaxClosedMs` and stays open with a dead consumer,
+  and the observed sidecar RTT is ~250 µs rather than ~1 s.
+
+## [0.85.4] - 2026-09-13
+
+Fixes the first three findings of the two-week adversarial review. No contract
+change — `contract_version` stays **0.32.0**.
+
+- **CV610 `.bin` import could read past its heap buffer.** The 3DNR half is
+  gated on the section length `OT_PQ_GetStructParamLen()` reports, but the
+  vendor reader (`PQ_BIN_SetNRDataV2`, `memcpy_s` at `0x12fc`) copies a fixed
+  1298 bytes from an offset that grows with a per-file count: the 36-byte
+  `OT_PQ_BIN_NRX` sub-header plus `12 + 4*count`, so it reaches up to 1410
+  bytes from the section start — 60 more than that gate's 1350. A section that
+  passed the gate could therefore let the reader end up to 60 bytes past the
+  allocation and feed those bytes to `ss_mpi_vi_set_pipe_3dnr_param`. The file
+  loader now allocates `CV610_PQ_NRX_VENDOR_MAX` (the reader's 1410-byte reach)
+  of zeroed slack past the file (`src/cv610_pq_bin_load.c`), so the bound holds
+  whatever the gate reports; the gate itself is unchanged, so valid tunes are
+  not rejected. New `test_cv610_pq_bin_load` performs the reader's worst-case
+  copy out of the loaded buffer, which `make test-asan` / CI catch as a
+  heap-buffer-overflow on an under-sized allocation.
+- **Maruko starved record control and the sidecar while the frame gate was
+  closed.** Both were serviced only inside
+  `maruko_pipeline_process_stream()`, which the gated branch of
+  `maruko_pipeline_await_frame()` returns before, so a `record/start` waited for
+  an escape pulse (up to `frameGateMaxClosedMs`). The record-control block is
+  now `maruko_service_record_control()`, called from both paths, and the gated
+  branch wakes on the sidecar via `idle_wait()` instead of a bare `usleep`.
+- **CV610 advertised the frame-gate tunables as unsupported.** `cv610_runtime.c`
+  feeds both to `frame_gate_setup()` but neither was in the CV610 allowlist, so
+  `/api/v1/set` returned 501 and the dashboard greyed controls the backend
+  reads. `test_venc_api` now asserts them on CV610 (with star6e/maruko crosses)
+  and `scripts/api_test_suite.sh` checks them on a live CV610.
+- Host verification and the hardware procedures for all three are in
+  `documentation/REVIEW_FIX_VERIFICATION.md`; the benches were offline when the
+  fixes landed, so the hardware steps are unrun.
+
+## [0.85.3] - 2026-09-13
+
+Completes the 0.85.2 build fix, which closed only part of the hole it
+described. No contract change — `contract_version` stays **0.32.0**.
+
+- **The stale-test-binary hole was still open for five headers.** 0.85.2
+  replaced a 20-header list with `$(wildcard include/*.h)`, but the tests also
+  compile from `lib/`, `tests/` and `tools/qr/`. Appending `#error POISON` to
+  `lib/cJSON.h` and re-running still printed "3147 passed, 0 failed" — the
+  binary never recompiled. `TEST_HEADERS` now globs every tree the oracles
+  reach, and each of the five is poison-verified to force a rebuild.
+- **`$(QR_TEST_RUNNER)` had the same hand-picked list** and is in the `verify`
+  path, so a stale QR oracle meant a green `make verify`. It and
+  `$(QR_HOST_DECODE)` now share `TEST_HEADERS`.
+- **The capacity test was blind to the case it advertised.** It looked for
+  `gateClosedMs` by name to prove the tail was intact, which cannot see a field
+  APPENDED after it — the old name is still present, just no longer last.
+  Appending two fields without growing the cap truncated the output at 191 of a
+  needed 213 bytes and the suite still passed. `frame_gate_status_json()` now
+  returns snprintf's would-be length, and the test asserts that instead, which
+  tracks the format string with no field names in it. `-Wformat-truncation`
+  cannot cover this: `cap` is a runtime parameter, not a constant.
+- **Dropped a tautological assertion.** `strlen(js) < sizeof(js)` cannot fail
+  for any snprintf output, since it always terminates within `cap`.
+- **Corrected the 0.85.2 arithmetic.** The fragment's worst case is 112 bytes
+  including the NUL, not 115: `gateClosedMs` is `closed_us / 1000`, so 17
+  digits rather than 20. The 128-byte buffers it replaced were therefore
+  sufficient, and 0.85.2 was a locality fix rather than the near-miss its notes
+  implied. The reason for the change is unaffected: one added field would have
+  overrun all three.
+
+## [0.85.2] - 2026-09-13
+
+Two latent build and buffer faults found while evaluating a new gate counter.
+No behaviour change on device, and no contract change — `contract_version`
+stays **0.32.0**.
+
+- **The gate status buffer was sized by three hand-copied constants.** All
+  three backends declared `char gate_json[128]` for the fragment
+  `frame_gate_status_json()` writes. The worst case is 112 bytes including the
+  NUL, so 128 was sufficient and no truncation was ever reachable — what was
+  wrong is that the number lived three files away from the format string that
+  determines it, with 16 bytes of headroom, so the next field added would have
+  overrun all three at once and done it silently.
+  `FRAME_GATE_STATUS_JSON_CAP` now lives beside the format string.
+- **The test runner depended on a hand-picked list of headers.** It named 20
+  and was missing 34 of the headers its sources include, `include/frame_gate.h`
+  among them. The tests build as one compiler invocation, so no `.d` files
+  cover this the way `-MMD` does for the cross builds. The failure mode is a
+  **false PASS**: change only a header and the suite runs against the previous
+  code and reports green. Measured on the fix itself — an undersized-buffer
+  mutation reported "3147 passed, 0 failed" before and "3146 passed, 1 failed"
+  after, from the identical edit.
+- **First test coverage of the status fragment**, which previously had none,
+  including the leading comma the three callers splice on.
+- **Documented how to read the gate on a live device.** A `gateEscapeBackstops`
+  counter was considered and rejected as redundant: the ring counts a frame in
+  `framesSent` only when the write lands, so `framesSent` flat while
+  `gateEscapeEvents` rises already means "escape pulses firing, nothing getting
+  through", and `transportDrops` then separates a full ring from a stopped
+  encoder. Verified on `.232` by transitioning a live craft in both
+  directions.
+
+## [0.85.1] - 2026-09-13
+
+A latency fix for the adaptive frame gate shipped in 0.85.0. No contract
+change — `contract_version` stays **0.32.0**, and no endpoint, payload or
+field changes.
+
+**Device-verified A/B on all three backends**, pre-fix and fixed binaries
+built from the same tree and identified by md5 at the device, with the
+rate-limited frame-shm consumer as the sole ring reader.
+
+- **The safety escape now admits one frame, not a burst.** When the gate has
+  been closed for `max_closed_ms` it force-opens so a frame reaches the ring
+  and `full_drops` reports a dead consumer instead of a silent stall. That
+  pulse used to stay open for a fixed 20 ms, which on a slow producer let the
+  drain loop flush its entire buffered backlog through as a burst. The pulse
+  now ends on the first frame that actually lands.
+- **Maruko, 30 fps against a 5 fps drain:** mean ring occupancy 6.29 -> 1.64
+  slots and minimum frame age 1460 -> 726 ms. The gate had been running
+  permanently on the safety pulse — close and escape counters advanced in
+  lockstep, one apart — because each pulse admitted ~2.9 frames, exactly
+  replacing what the consumer took, so occupancy never fell back to the
+  reopen threshold. Escapes are now flat while closes continue normally.
+- **Delivered rate and judder are unchanged** (5.6 /s at spread 1 in both
+  arms), and both arms emit **zero keyframes**. The improvement is latency,
+  not throughput.
+- **Star6E and CV610 are unaffected**, as expected: both reach the reopen
+  threshold through the normal drain path, so the escape branch is almost
+  never taken. Ring occupancy 1.52 -> 1.52 at 100->25 fps and 1.55 -> 1.54 at
+  100->15 fps.
+- `FRAME_GATE_MIN_OPEN_US` is renamed `FRAME_GATE_ESCAPE_BACKSTOP_US`: it is
+  now a maximum rather than a minimum, covering only the case where the
+  admitted frame never arrives (stopped encoder, or a full ring that drops
+  the write).
+
+## [0.85.0] - 2026-09-12
+
+An IDR-free way to shed load. `contract_version` **0.31.0 -> 0.32.0**: the
+`video0.frameGate` switch is removed (so `/api/v1/set` now rejects it and
+`/api/v1/config` no longer carries it), and `/api/v1/transport/status` gains
+four `gate*` fields on frame-shm outputs. Two restart-required `video0` fields
+remain.
+
+**Device-verified on all three backends and over a real RF link.** Star6E
+(SSC338Q, 720p100, `resilience=racing`), Maruko (ssc378qe, 1080p30) and CV610
+(IMX662, 720p100), each with proven stall cycles; then `.232` transmitting to
+an x86 ground that latched and claimed the craft, with the link's MCS pinned
+and its bitrate controller disabled so the offered rate genuinely exceeded
+what the radio could carry.
+
+- **Adaptive frame gate, always on for frame-shm outputs.** While the egress
+  ring is backed up the backend stops draining the encoder's output FIFO, and
+  resumes when the consumer catches up. **No SDK call is made in either
+  direction**, and that is the whole design.
+- **Pausing intake instead emits a keyframe on every resume.** Measured, one
+  IRAP picture per reopen on Star6E (`MI_VENC_StopRecvPic`/`StartRecvPic`),
+  three on Maruko, and 0.6 on CV610 (`ss_mpi_venc_stop_chn`/`start_chn`) —
+  against a natural background of about one per 40 s. On a real
+  capacity-limited link it reached **~4.6 keyframes per second**, which is the
+  craft firing its largest frame into a saturated radio several times a
+  second: the exact pathology the feature exists to prevent. Letting the FIFO
+  backpressure instead measured **zero** induced keyframes on every backend
+  and on the live link.
+- **The gate is observable.** `/api/v1/transport/status` reports `gateClosed`,
+  `gateCloseEvents`, `gateEscapeEvents` and `gateClosedMs` on frame-shm
+  outputs. Without them "cycling normally under load", "escape firing against
+  a dead consumer" and "stream stopped" are indistinguishable from outside;
+  `gateEscapeEvents` climbing on its own is the dead-consumer signature.
+- **There is no enable switch.** `video0.frameGate` is gone. The gate arms
+  itself whenever the output is a frame ring, because the ring is the
+  occupancy signal it runs on and no other transport has one. Only
+  `frameGateCloseSlots` and `frameGateMaxClosedMs` remain.
+- **It trades latency for continuity, and that is visible.** Nothing is
+  dropped while gated — frames accumulate in VENC's output FIFO — so the image
+  stays clean and continuous but runs several hundred ms behind on a heavily
+  oversubscribed link (operator-confirmed). Attributed: the delay is the
+  encoder's bitstream buffer depth times the consumer's frame period — a
+  near-constant ~5.2 consumer-frame-intervals, 4.1 ms ungated, 170 ms at a
+  30 fps drain, 538 ms at 10 fps, of which the ring holds only 1.5 frames.
+  The encoder's bitstream buffer is now capped at 2 frames
+  (`FRAME_GATE_STREAM_BUF_FRAMES`, SDK default 3), which takes a 10 fps drain
+  from 534 to 436 ms. It is continuity-safe because the SDK drops the pending
+  image *before* encoding, and 2 rather than 1 keeps one slot of tolerance for
+  a consumer that stalls — mirror-mode recordings share the channel. Verified
+  on an SD card: 128 s at 100.0 fps, 0 dropped frames, writer never backed up,
+  and the file decodes with zero errors.
+- **Under partial congestion it settles at the link rate.** Against a
+  rate-limited consumer the delivered rate tracked 20, 40, 60 and 80 fps with
+  a spread of at most one frame per second, holding the ring at ~1.5 of 8
+  slots — graceful degradation with no queueing latency, not 0/100 judder.
+- **The safety escape needed a dwell to work at all.** It reopened while
+  occupancy was still above the close threshold, so the next observation —
+  1 ms later on Star6E, against a 10 ms frame period — closed again before the
+  admitted frame could exist. A dead consumer therefore stopped the stream
+  with *every drop counter at zero*. `FRAME_GATE_MIN_OPEN_US` holds the escape
+  pulse open for 20 ms, and only the pulse, so burst response is unchanged:
+  `transportDrops` now climbs instead of the stream going quiet.
+- **A bitrate write is the only proportional rate actuator on SigmaStar and
+  `MI_VENC_SetChnAttr` keyframes on its own** (measured on SSC338Q: ten spaced
+  `video0.bitrate` writes, eleven IRAP access units), so the standard response
+  to congestion injects the largest frame in the stream into the link that is
+  already overflowing. The gate changes no encoder state at all, so ROI keeps
+  its relative QP gradient and CBR keeps its contract.
+- **No IDR-free proportional QP lever exists to substitute**, which is why
+  this is a gate and not a rate write: `qpDelta` writes `s32IPQPDelta` and
+  only redistributes bits between I and P, and `min_qp` abandons CBR at a
+  cliff (19.58 Mbps -> 0.63 between 20 and 24 on the README bench) rather than
+  scaling.
+- **Signal is the instantaneous per-frame ring occupancy, not the published
+  `low_water_slots`** — that is a 200 ms window, right for waybeam-link's rate
+  model and far too slow to catch a burst. The existing per-frame ring read in
+  the stream loop already owns the VENC channel, so the gate needs no poller
+  and no extra thread. The 200 ms export is unchanged; rate policy still lives
+  in waybeam-link and the gate only covers the transients between its
+  decisions.
+- **Hysteresis is closed-biased:** close at `>= 3` slots, reopen at `<= 1`
+  (pinned — the ring's healthy idle occupancy is one frame, not zero) after a
+  20 ms debounce, with a `frameGateMaxClosedMs` safety escape (default 500 ms)
+  so a dead consumer cannot stop the stream for good. On escape the ring
+  overflows and reports `full_drops`, which is diagnosable; a silently stopped
+  stream is not.
+- **Mirror-mode recordings are protected.** Where the recorder shares ch0,
+  closes are suppressed while a recording is actually running, so congestion
+  never punches holes in the SD file. Reopens are never suppressed.
+  `dual`/`dual-stream` put the recorder on ch1 and are unaffected. (The plan
+  called for refusing the gate outright in mirror mode; `mirror` turned out to
+  be the *default* record mode, which would have made the feature unreachable.)
+- **Maruko needed two guards Star6E did not.** Its idle path aborts the stream
+  loop after 20 s without encoder data and warns at 1 s — a closed gate looks
+  exactly like a stalled encoder — so both are suppressed while gated. And its
+  fd wait polls at 1 s, which would have become the reopen latency; that drops
+  to 2 ms while closed.
+- **Two SDK routes were tried and measured dead**, and are not shipped:
+  `MI_VENC_EnableIdr(false)` does not suppress the resume keyframe (12 IRAP
+  NALs with it on, 12 with it off), and `MI_VENC_SetFrameLostStrategy` is
+  inert on both SigmaStar boards — a 1 kbit/s threshold against a live
+  7 Mbit/s stream changed nothing, and Maruko returns success while doing
+  nothing.
+- `src/frame_gate.c` is a pure state machine with no SDK types, unit-tested on
+  the host like `src/intra_refresh.c`, and it now also owns the actuator so
+  the three backends cannot drift.
+- **All three backends.** CV610 uses `ss_mpi_venc_stop_chn` /
+  `ss_mpi_venc_start_chn(recv_pic_num=-1)` — the same primitive the SigmaStar
+  backends reach as `MI_VENC_Stop/StartRecvPic`, and exactly what the `ldy_sky`
+  vendor streamer does on the same silicon. Its `select()` wait drops from 1 s
+  to 2 ms while gated for the same reason Maruko's poll does. CV610 records in
+  mirror mode only, so the recorder always shares the gated channel and the
+  close-suppression always applies there.
+- **CV610 is linked and confirmed on device.** Hardware verification found and
+  fixed an initialization-order defect: gate setup ran before
+  `cv610_output_start()` created the frame ring, so every frame-shm gate was
+  incorrectly declared inert. Setup now runs immediately after output creation.
 
 ## [0.84.0] - 2026-09-06
 

@@ -16,6 +16,9 @@ tools/ive_i6c_shift
 tools/ive_i6c_hwop
 
 tests/test_runner
+tests/test_runner.werror
+tests/test_runner.asan
+tests/test_runner.tsan
 tests/test_cv610_validation
 tests/test_imu_ring
 tests/test_qr_marker
