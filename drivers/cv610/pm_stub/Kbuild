@@ -1,0 +1,1 @@
+obj-m := open_pm_stub.o

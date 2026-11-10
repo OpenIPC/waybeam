@@ -1,0 +1,120 @@
+From: Waybeam CV610 bring-up <devnull@example.com>
+Subject: [PATCH] sys_config: select the sensor MCLK at runtime, not at insmod
+
+The sensor clock could only be chosen through the `sensors=` name string,
+which parse_sensor_clock() maps to a CRG word at module init. That forces
+one clock per boot, which is wrong for a sensor whose modes need different
+input clocks: the IMX662 runs 30/60/90 fps on 37.125 MHz and 100 fps on
+27 MHz (27 MHz fed while the sensor selects its 24 MHz INCK profile,
+register 0x3014 = 0x04).
+
+The mismatch is silent and scales the frame rate by the clock ratio -- a
+60 fps mode brought up under the 27 MHz profile delivers 60 * 27/37.125 =
+43.6 fps, measured, while every status surface still reports 60.
+
+Add a writable sns0_clk_hz parameter so userspace can pick the SoC-side
+clock in the same step where it already picks the sensor-side INCK_SEL.
+It takes a frequency rather than a register value, so the CRG encoding
+stays next to parse_sensor_clock() and userspace never encodes it.
+
+Note the values are the RUNNING register forms, which differ from the ones
+parse_sensor_clock() writes at insmod: OT_MIPI_ENABLE_SENSOR_CLOCK rewrites
+this register during bring-up (0xA001 from the table reads back 0xA010 once
+enabled). Writing an insmod-form value at runtime gates the clock off --
+0xA001 reads back 0xA000, the sensor loses MCLK and every I2C write fails.
+Both forms measured on the demo board.
+
+Verified on a Hi3516CV610 demo board with an IMX662, boot profile left at
+sc4336p so the daemon overrides it every time: 30/60/90/100 fps all deliver
+their nominal rate (ratio 1.000-1.002), where previously only the mode
+matching the boot profile was correct.
+
+---
+ kernel/sys_config/hi3516cv6xx/sys_cfg.c | 77 +++++++++++++++++++++++++
+ 1 file changed, 77 insertions(+)
+--- a/kernel/sys_config/hi3516cv6xx/sys_cfg.c
++++ b/kernel/sys_config/hi3516cv6xx/sys_cfg.c
+@@ -271,6 +271,83 @@
+     sys_writel(g_reg_crg_base, offset, clock);
+ }
+ 
++/*
++ * Runtime sensor MCLK selection.
++ *
++ * Without this the sensor clock is fixed at insmod time, because the only
++ * way to pick it is the `sensors=` name string that parse_sensor_clock()
++ * maps to a CRG word.  That is wrong for a sensor whose modes need
++ * different input clocks: the IMX662 runs 30/60/90 fps on 37.125 MHz and
++ * 100 fps on 27 MHz (27 MHz fed while the sensor selects its 24 MHz INCK
++ * profile).  Userspace already picks the sensor-side INCK_SEL per mode;
++ * this lets it pick the matching SoC-side clock in the same breath instead
++ * of encoding the choice in a boot-time module argument.
++ *
++ * The parameter takes a FREQUENCY, not a register value, so the CRG
++ * encoding stays here next to parse_sensor_clock() and userspace never has
++ * to know it.
++ */
++static unsigned int g_sns0_clk_hz;
++
++static int sns0_clk_hz_set(const char *val, const struct kernel_param *kp)
++{
++    unsigned int hz;
++    unsigned int clock;
++    int ret;
++
++    (void)kp;
++    /* Runtime only: CRG is mapped in module init, after load-time params
++     * are parsed, so sns0_clk_hz= on the insmod line fails the load. */
++    if (g_reg_crg_base == NULL) {
++        return -ENODEV;
++    }
++    ret = kstrtouint(val, 0, &hz);
++    if (ret != 0) {
++        return ret;
++    }
++    /*
++     * These are the RUNNING register forms, which are not the values
++     * parse_sensor_clock() writes at insmod.  OT_MIPI_ENABLE_SENSOR_CLOCK
++     * rewrites this register when the pipeline brings the clock up: the
++     * board boots 0xA001 from the sc4336p table entry and reads back
++     * 0xA010 once enabled.  Writing an insmod-form value after the enable
++     * leaves the clock gated -- 0xA001 written at runtime reads back
++     * 0xA000, the sensor loses MCLK, and every I2C write fails.  Measured
++     * both ways on the demo board.
++     *
++     * 24 MHz is deliberately absent: no mode uses it, and its running form
++     * has not been measured.  Do not guess one from the table.
++     */
++    switch (hz) {
++        case 27000000: clock = 0xA010; break;
++        case 37125000: clock = 0x8010; break;
++        default:
++            sys_config_print("sns0_clk_hz: %u not 27000000/37125000\n", hz);
++            return -EINVAL;
++    }
++    sensor_clock_config(0, clock);
++    g_sns0_clk_hz = hz;
++    sys_config_print("sns0_clk_hz: %u -> CRG 0x8440 = 0x%X\n", hz, clock);
++    return 0;
++}
++
++/* The last value accepted by the setter, not a read-back: the register is
++ * also written by sensor_cfg() at insmod and by the MIPI clock enable, so
++ * this reports what was requested here and 0 if nothing was. */
++static int sns0_clk_hz_get(char *buffer, const struct kernel_param *kp)
++{
++    (void)kp;
++    return scnprintf(buffer, PAGE_SIZE, "%u\n", g_sns0_clk_hz);
++}
++
++static const struct kernel_param_ops sns0_clk_hz_ops = {
++    .set = sns0_clk_hz_set,
++    .get = sns0_clk_hz_get,
++};
++
++module_param_cb(sns0_clk_hz, &sns0_clk_hz_ops, NULL, 0600);
++MODULE_PARM_DESC(sns0_clk_hz, "sensor0 MCLK in Hz, runtime only: 27000000 or 37125000");
++
+ static unsigned int parse_sensor_clock(const char *name, unsigned int name_len)
+ {
+     unsigned int clock = 0x0;

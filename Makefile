@@ -27,6 +27,12 @@ KSRC_MARUKO ?=
 # the OpenIPC builder output at builder/openipc/output/build/linux-custom.
 KSRC_STAR6E ?=
 
+# Hi3516CV610 kernel for the two kernel modules in drivers/cv610 (runtime
+# sensor clock, PM stub).  KSRC_CV610 must be the OpenIPC
+# hisilicon-hi3516cv6xx 5.10 kernel, configured and modules_prepare'd -- the
+# firmware build's linux-custom.  Not hosted here and not downloaded.
+KSRC_CV610 ?=
+
 STAR6E_CC ?= $(TOOLCHAIN_DIR)/bin/arm-openipc-linux-gnueabihf-gcc
 MARUKO_CC ?= $(TOOLCHAIN_MARUKO_DIR)/bin/arm-openipc-linux-musleabihf-gcc
 
@@ -187,7 +193,7 @@ CFLAGS += $(COMMON_CFLAGS) $(SOC_CFLAGS) $(SOC_DEFS)
 LDFLAGS += $(COMMON_LDFLAGS) $(SOC_LDFLAGS)
 
 .PHONY: help all build lint stage clean toolchain toolchain-maruko toolchain-cv610 cv610-sdk sensor-cv610 ksrc-maruko \
-        drivers-maruko ksrc-star6e drivers-star6e maruko-pull maruko-deploy maruko-full json_cli regscan \
+        drivers-maruko ksrc-star6e drivers-star6e drivers-cv610 maruko-pull maruko-deploy maruko-full json_cli regscan \
         remote-test verify pre-pr \
         check check-soc-stamp print-config test test-werror test-asan test-tsan test-ci \
         qr-decode unix-dgram-consumer qr-test-host qr-test-cli qr-test-extended qr-test-phone webui webui-check
@@ -218,6 +224,7 @@ help:
 	@echo "  make drivers-maruko KSRC_MARUKO=/path/to/kernel  Build sensors/maruko/sensor_imx*_maruko.ko"
 	@echo "  make ksrc-star6e KSRC_STAR6E=/path/to/kernel  Validate Infinity6E 4.9.84 kernel source tree"
 	@echo "  make drivers-star6e KSRC_STAR6E=/path/to/kernel  Build sensors/star6e/sensor_imx*_star6e.ko"
+	@echo "  make drivers-cv610 KSRC_CV610=/path/to/kernel CV610_SDK_INC=...  Build the CV610 sys_config/PM kernel modules"
 	@echo "  make json_cli SOC_BUILD=maruko  Build out/<soc>/json_cli (vendored from waybeam-hub)"
 	@echo "  make regscan SOC_BUILD=maruko   Build out/<soc>/regscan (IMX335/IMX415 i2c register dumper)"
 	@echo "  make maruko-pull HOST=root@<ip>  Pull libs/drivers/isp-bins from a device"
@@ -409,6 +416,15 @@ stage: build qr-decode
 			echo "  stage: NOTE no libbin.so at $(CV610_PQ_LIB) -- isp.sensorBin"; \
 			echo "         and /api/v1/iq/export_bin will no-op on the craft."; \
 			echo "         Set CV610_PQ_LIB to stage it."; \
+		fi; \
+		if [ -f drivers/cv610/build/open_sys_config_imx662.ko ]; then \
+			mkdir -p $(OUT_DIR)/cv610; \
+			cp -f drivers/cv610/build/*.ko $(OUT_DIR)/cv610/; \
+			echo "  stage: CV610 kernel modules from drivers/cv610/build"; \
+		else \
+			echo "  stage: NOTE no CV610 kernel modules -- 1080p100 needs the"; \
+			echo "         runtime sensor clock in open_sys_config_imx662.ko."; \
+			echo "         Build them with make drivers-cv610 KSRC_CV610=..."; \
 		fi; \
 	fi
 
@@ -663,6 +679,18 @@ drivers-star6e: toolchain ksrc-star6e
 	@echo "Built modules in sensors/star6e/:"
 	@ls -lh sensors/star6e/*_star6e.ko 2>/dev/null || echo "  (none — check drivers/ build output)"
 
+# ── CV610 kernel modules ───────────────────────────────────────────────
+#
+# The runtime sensor clock (sns0_clk_hz, which 1080p100 needs) and the PM
+# registration stub that init.d/load-cv610-online loads from /usr/lib/cv610.
+# See drivers/cv610/README.md.  KSRC_CV610 is never fetched:
+#
+#   make drivers-cv610 KSRC_CV610=/path/to/linux CV610_SDK_INC=...
+drivers-cv610: toolchain-cv610
+	$(MAKE) -C drivers/cv610 modules KSRC="$(abspath $(KSRC_CV610))" \
+		SDK="$(abspath $(CV610_SDK_INC))" \
+		CROSS="$(patsubst %gcc,%,$(CV610_CC_SUBMAKE))"
+
 # ── Maruko deploy convenience wrappers ────────────────────────────────
 
 maruko-pull:
@@ -739,3 +767,4 @@ clean:
 	rm -f $(QR_HOST_DECODE)
 	rm -f .build_soc
 	$(MAKE) -C sensors/cv610/imx662 clean
+	$(MAKE) -C drivers/cv610 clean

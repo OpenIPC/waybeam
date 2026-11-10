@@ -84,6 +84,55 @@ jobs:
           test -f out/cv610/waybeam-cv610.conf
           test -f out/cv610/cv610/libsns_imx662.so
 
+  # The CV610 kernel modules (drivers/cv610): the runtime sensor clock patch
+  # must keep applying to the pinned OpenHisilicon and both must keep
+  # building against the kernel the CV6xx images use.
+  kmod-cv610:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The image's own opensdk version (OpenIPC/firmware
+      # HISILICON_OPENSDK_VERSION), not the header pin above: this module
+      # replaces the image's sys_config.
+      - name: Fetch OpenHisilicon at the image's opensdk version
+        uses: actions/checkout@v4
+        with:
+          repository: OpenIPC/openhisilicon
+          ref: 97e55c4698c9c18fbd8984bfa6591797e7cd3356
+          path: .deps/openhisilicon
+          sparse-checkout: kernel
+      - name: Fetch pinned CV6xx kernel config
+        uses: actions/checkout@v4
+        with:
+          repository: OpenIPC/firmware
+          ref: d8fbff3e2187ab0d042c84373766682a821294f7
+          path: .deps/firmware
+          sparse-checkout: br-ext-chip-hisilicon/board/hi3516cv6xx
+      - name: Fetch pinned CV6xx kernel
+        uses: actions/checkout@v4
+        with:
+          repository: OpenIPC/linux
+          ref: b51c4da54677ce7bc99ada9a56b38e5a397f8f05
+          path: .deps/linux
+      - name: Fetch CV610 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex
+          make toolchain-cv610
+      - name: Prepare the kernel for out-of-tree modules
+        run: |
+          X="$PWD/toolchain/toolchain.hisilicon-hi3516cv6xx/bin/arm-openipc-linux-musleabi-"
+          cp .deps/firmware/br-ext-chip-hisilicon/board/hi3516cv6xx/hi3516cv6xx.generic.config \
+            .deps/linux/.config
+          make -C .deps/linux ARCH=arm CROSS_COMPILE="$X" olddefconfig
+          make -C .deps/linux ARCH=arm CROSS_COMPILE="$X" -j"$(nproc)" modules_prepare
+      - name: Build the CV610 kernel modules
+        run: |
+          make -j"$(nproc)" drivers-cv610 KSRC_CV610=.deps/linux \
+            CV610_SDK_INC=.deps/openhisilicon
+          test -f drivers/cv610/build/open_sys_config_imx662.ko
+          test -f drivers/cv610/build/open_pm_stub.ko
+
   # ── Full build + artifact upload ────────────────────────────────────
 
   build:
