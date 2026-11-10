@@ -1,5 +1,49 @@
 # History
 
+## [0.85.0] - 2026-11-10
+
+**CV610 drives a Sony IMX335 as well as the IMX662**, chosen from the u-boot
+`sensor` name. No config field, no API change: `contract_version` stays
+**0.31.0**. Built from DmtryJS's OpenIPC/waybeam#126 and #127, cut down to what
+this tree needs now that the IMX335 driver lives in OpenIPC/openhisilicon.
+
+- **`$SENSOR` picks the plugin, the ISP sensor id and the mode table.** It is
+  the u-boot name OpenIPC's rcS exports and its module loader brings the
+  sensor up by; `S95waybeam` asks `fw_printenv -n sensor`, then
+  `ipcinfo --short-sensor`, when started without it. A missing or unknown
+  name comes up as IMX662 with a `WARNING`, and bring-up logs
+  `> CV610 sensor: <name> (<plugin>)`. Switching parts is
+  `fw_setenv sensor <name>`. Validation and `/api/v1/modes` read the same
+  table, so `/api/v1/set` accepts exactly the modes of the part fitted.
+- **IMX335 uses the image's plugin** (`/usr/lib/sensors/libsns_imx335.so`,
+  OpenIPC/openhisilicon `sony_imx335`, on `ultimate` images) with five fixed
+  modes: 2592x1944p30 RAW12, 1296x972p60 binned, 1080p90 crop, 2592x1944p40
+  RAW10 and 2592x1520p30 crop, all on 37.125 MHz. Vertical flip is refused in
+  the two crops, and their `/api/v1/modes` labels say so. `pub.sns_mode`
+  stays 0: the plugin tells the rows apart by size and rate.
+- **Mode selection matches the rate among modes that capture the encoded
+  size**, which SigmaStar's `sensor_select()` also prefers (the remaining
+  differences are listed at `cv610_mode_select()`). IMX662 is unaffected
+  (every mode is 1080p); on IMX335, 1080p60 runs the 1080p90 crop instead of
+  being rejected as an upscale of the binned mode. `video0.size=auto` encodes
+  the capture rounded down to a multiple of 8 (1296x968 on the binned mode).
+- **On waybeam's own `load-cv610-online`,** the IMX335 needs the
+  `sns0_clk_hz` sys_config for its clock, and its 2592-wide rows need more
+  than the default 64 MiB MMZ (about 60-80 MiB of VB), which on a 128 MiB
+  board is already all the RAM above the kernel. Selecting one there fails
+  bring-up. The binned and 1080p crop rows fit as is. `CV610_MMZ_START` and
+  `CV610_MMZ_SIZE` are now passed through from `/etc/waybeam-cv610.conf`, to
+  move together with the kernel's `mem=` on a board laid out for it.
+- **Upgrade note: the IMX662 plugin moves to `/usr/lib/cv610/libsns_imx662.so`**
+  and is staged at `out/cv610/cv610/`. OpenIPC images now install their own
+  copy at `/usr/lib/sensors/`, which refuses 1080p100; keeping waybeam's out
+  of that path means a sysupgrade cannot swap it in. A binary updated without
+  its plugin fails with `dlopen /usr/lib/cv610/libsns_imx662.so`; a firmware
+  package installing the old staged path now fails at build time instead.
+- Not hardware-verified as integrated here: the IMX335 rows were verified by
+  DmtryJS on a Hi3516CV610 + IMX335 under a stock OpenIPC image's loader and
+  memory layout, with the #126/#127 code.
+
 ## [0.84.1] - 2026-11-10
 
 The CV610 IMX662 plugin takes the fixes its OpenHisilicon copy gained in

@@ -1,6 +1,11 @@
 #include "cv610_modes.h"
 
-/* All four entries are hardware-verified on the IMX662 bring-up board.
+#include <stdlib.h>
+#include <strings.h>
+
+/* ---- IMX662: 1920x1080, four rates ---------------------------------------
+ *
+ * All four entries are hardware-verified on the IMX662 bring-up board.
  *
  * The clock column is the one that bites.  The sensor keeps whatever line
  * timing it was programmed with regardless of the MCLK it is actually fed,
@@ -9,21 +14,63 @@
  * Measured 43.6 fps for the 60 fps mode when it ran on the 100 fps mode's
  * 27 MHz clock.  Only 100 fps takes the sensor's 24 MHz INCK profile
  * overclocked to 27 MHz (INCK_SEL 0x04); the rest run 37.125 MHz. */
-static const Cv610SensorMode g_cv610_modes[] = {
+static const Cv610SensorMode g_imx662_modes[] = {
 	{ 1920, 1080,  30, 12, 37125000u, "1080p30 RAW12" },
 	{ 1920, 1080,  60, 12, 37125000u, "1080p60 RAW12" },
 	{ 1920, 1080,  90, 10, 37125000u, "1080p90 RAW10" },
 	{ 1920, 1080, 100, 10, 27000000u, "1080p100 RAW10" },
 };
 
-#define CV610_MODE_COUNT \
-	(sizeof(g_cv610_modes) / sizeof(g_cv610_modes[0]))
+/* ---- IMX335: 2592x1944 and crops, five fixed modes -----------------------
+ *
+ * The plugin is OpenIPC/openhisilicon's sony_imx335 as the firmware image
+ * installs it; nothing about it needs a workaround here.  These rows are the
+ * fixed modes of its mode_tbl[], in the same order, at the rates #127 brought
+ * them up at (binning can reach 76), and every one runs on 37.125 MHz.
+ * pub.sns_mode stays 0 ("auto"): the plugin then picks its mode from the exact
+ * capture size and a rate inside that mode's range, which keeps rows 0 and 3
+ * (same size, 30 vs 40) and 0 and 4 (same rate, different size) apart.  Its
+ * flexible window crop (mode 5) has no fixed size and is not listed.  The
+ * plugin refuses vertical flip in the two crop windows and logs why; their
+ * labels say so, since /api/v1/modes is where an operator reads them. */
+static const Cv610SensorMode g_imx335_modes[] = {
+	{ 2592, 1944, 30, 12, 37125000u, "2592x1944p30 RAW12" },
+	{ 1296,  972, 60, 10, 37125000u, "1296x972p60 RAW10 binned" },
+	{ 1920, 1080, 90, 10, 37125000u, "1080p90 RAW10 crop, no V-flip" },
+	{ 2592, 1944, 40, 10, 37125000u, "2592x1944p40 RAW10" },
+	{ 2592, 1520, 30, 10, 37125000u, "2592x1520p30 RAW10 crop, no V-flip" },
+};
 
-const Cv610SensorMode *cv610_mode_table(size_t *count)
+#define TABLE(t) (t), (sizeof(t) / sizeof((t)[0]))
+
+/* IMX662 is waybeam's own plugin, built from sensors/cv610/imx662 and kept
+ * out of /usr/lib/sensors so an image's stock copy (which refuses 100 fps)
+ * can never stand in for it.  IMX335 is the image's. */
+static const Cv610Sensor g_sensors[] = {
+	{ "imx662", "/usr/lib/cv610/libsns_imx662.so", "g_sns_imx662_obj", 662,
+	  TABLE(g_imx662_modes) },
+	{ "imx335", "/usr/lib/sensors/libsns_imx335.so", "g_sns_imx335_obj", 335,
+	  TABLE(g_imx335_modes) },
+};
+
+const Cv610Sensor *cv610_sensor_find(const char *name)
 {
-	if (count)
-		*count = CV610_MODE_COUNT;
-	return g_cv610_modes;
+	size_t i;
+
+	if (name == NULL)
+		return NULL;
+	for (i = 0; i < sizeof(g_sensors) / sizeof(g_sensors[0]); ++i) {
+		if (strcasecmp(name, g_sensors[i].name) == 0)
+			return &g_sensors[i];
+	}
+	return NULL;
+}
+
+const Cv610Sensor *cv610_sensor_current(void)
+{
+	const Cv610Sensor *s = cv610_sensor_find(getenv("SENSOR"));
+
+	return s ? s : &g_sensors[0];
 }
 
 /* VPSS scales, it does not invent detail: upscaling past the captured size
@@ -32,23 +79,63 @@ const Cv610SensorMode *cv610_mode_table(size_t *count)
 #define CV610_OUT_ALIGN 8u
 #define CV610_OUT_MIN   128u
 
-const Cv610SensorMode *cv610_mode_for_fps(uint32_t fps)
+/* Whether a mode captures at least the requested encode size, so VPSS can
+ * produce it without upscaling.  An unset size (0x0) fits every mode. */
+static int mode_fits(const Cv610SensorMode *m, uint32_t width,
+	uint32_t height)
 {
-	size_t i;
-
-	for (i = 0; i < CV610_MODE_COUNT; ++i) {
-		if (g_cv610_modes[i].fps == fps)
-			return &g_cv610_modes[i];
-	}
-	return NULL;
+	return (width == 0 && height == 0) ||
+		(m->width >= width && m->height >= height);
 }
 
-const Cv610SensorMode *cv610_mode_select(int forced_mode, uint32_t target_fps,
+/* The rate rule over the modes that fit: exact rate (first row wins), else the
+ * slowest mode still faster than the target -- never deliver fewer frames than
+ * asked for while a mode can keep up -- else the fastest.  NULL when no mode
+ * fits.  *pick_i receives the row. */
+static const Cv610SensorMode *select_by_rate(const Cv610Sensor *sensor,
+	uint32_t target_fps, uint32_t width, uint32_t height, size_t *pick_i)
+{
+	const Cv610SensorMode *pick = NULL;
+	size_t i;
+
+	for (i = 0; i < sensor->mode_count; ++i) {
+		const Cv610SensorMode *m = &sensor->modes[i];
+
+		if (mode_fits(m, width, height) && m->fps == target_fps) {
+			*pick_i = i;
+			return m;
+		}
+	}
+	for (i = 0; i < sensor->mode_count; ++i) {
+		const Cv610SensorMode *m = &sensor->modes[i];
+
+		if (mode_fits(m, width, height) && m->fps > target_fps &&
+			(pick == NULL || m->fps < pick->fps)) {
+			pick = m;
+			*pick_i = i;
+		}
+	}
+	if (pick != NULL)
+		return pick;
+	/* Target above every mode that fits: clamp to the fastest. */
+	for (i = 0; i < sensor->mode_count; ++i) {
+		const Cv610SensorMode *m = &sensor->modes[i];
+
+		if (mode_fits(m, width, height) &&
+			(pick == NULL || m->fps > pick->fps)) {
+			pick = m;
+			*pick_i = i;
+		}
+	}
+	return pick;
+}
+
+const Cv610SensorMode *cv610_mode_select(const Cv610Sensor *sensor,
+	int forced_mode, uint32_t target_fps, uint32_t width, uint32_t height,
 	int *out_index)
 {
 	const Cv610SensorMode *pick;
 	size_t pick_i = 0;
-	size_t i;
 
 	if (out_index)
 		*out_index = -1;
@@ -57,44 +144,22 @@ const Cv610SensorMode *cv610_mode_select(int forced_mode, uint32_t target_fps,
 	 * Parity with find_best_mode(), which fails bring-up rather than
 	 * quietly running a mode the operator did not ask for. */
 	if (forced_mode >= 0) {
-		if ((size_t)forced_mode >= CV610_MODE_COUNT)
+		if ((size_t)forced_mode >= sensor->mode_count)
 			return NULL;
 		if (out_index)
 			*out_index = forced_mode;
-		return &g_cv610_modes[forced_mode];
+		return &sensor->modes[forced_mode];
 	}
-	/* Nothing to select against.  Rejecting keeps the behaviour this
-	 * function replaced — a bare cv610_mode_for_fps(0) returned NULL too —
-	 * rather than inventing a rate for a config that names none. */
+	/* Nothing to select against.  Rejecting rather than inventing a rate for
+	 * a config that names none. */
 	if (target_fps == 0)
 		return NULL;
 
-	pick = cv610_mode_for_fps(target_fps);
-	if (pick != NULL) {
-		if (out_index)
-			*out_index = (int)(pick - g_cv610_modes);
-		return pick;
-	}
-
-	/* Slowest mode still faster than the target: never deliver fewer frames
-	 * than asked for while a mode that can keep up exists. */
-	for (i = 0; i < CV610_MODE_COUNT; ++i) {
-		const Cv610SensorMode *m = &g_cv610_modes[i];
-
-		if (m->fps > target_fps && (pick == NULL || m->fps < pick->fps)) {
-			pick = m;
-			pick_i = i;
-		}
-	}
-	/* Target above every mode: clamp to the fastest. */
-	if (pick == NULL) {
-		for (i = 0; i < CV610_MODE_COUNT; ++i) {
-			if (pick == NULL || g_cv610_modes[i].fps > pick->fps) {
-				pick = &g_cv610_modes[i];
-				pick_i = i;
-			}
-		}
-	}
+	pick = select_by_rate(sensor, target_fps, width, height, &pick_i);
+	/* No mode captures the requested size: choose on rate alone and let
+	 * cv610_mode_check_output() reject the size against that mode. */
+	if (pick == NULL)
+		pick = select_by_rate(sensor, target_fps, 0, 0, &pick_i);
 	if (out_index)
 		*out_index = (int)pick_i;
 	return pick;
@@ -131,8 +196,10 @@ void cv610_mode_resolve_output(const Cv610SensorMode *mode,
 	if (mode != NULL) {
 		int given = (req_width != 0 && req_height != 0);
 
-		w = given ? req_width : mode->width;
-		h = given ? req_height : mode->height;
+		/* Auto is the capture, held to the alignment an explicit size
+		 * must meet: IMX335's binned 1296x972 encodes as 1296x968. */
+		w = given ? req_width : mode->width / CV610_OUT_ALIGN * CV610_OUT_ALIGN;
+		h = given ? req_height : mode->height / CV610_OUT_ALIGN * CV610_OUT_ALIGN;
 	}
 	if (out_width)
 		*out_width = w;

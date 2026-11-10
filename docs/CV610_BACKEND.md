@@ -1,4 +1,4 @@
-# CV610 + IMX662 backend
+# CV610 backend (IMX662, IMX335)
 
 Tracking: #220
 
@@ -11,10 +11,11 @@ large control surface.
 ## Current slice
 
 - `SOC_BUILD=cv610` produces a 32-bit ARMv7 musl `waybeam` binary.
-- The backend owns the proven IMX662 MIPI -> VI -> ISP -> VENC lifecycle.
-- Linear 1920x1080 modes at 30/60 fps RAW12 and 90/100 fps RAW10 are accepted
-  (see "Sensor modes" below — the table in `src/cv610_modes.c` is the only
-  place they are written down).
+- The backend owns the proven IMX662 MIPI -> VI -> ISP -> VENC lifecycle, and
+  drives an IMX335 through the same graph (see "Sensor selection").
+- IMX662: linear 1920x1080 modes at 30/60 fps RAW12 and 90/100 fps RAW10.
+  IMX335: five fixed modes (see "Sensor selection"). The tables in
+  `src/cv610_modes.c` are the only place they are written down.
 - H.265 CBR and GOP come from the existing `VencConfig` fields. `video0.qpDelta`
   is **not** among them: CV610's rate control stores every I-frame input and
   then ignores it, so the field is not advertised for this backend and
@@ -37,8 +38,9 @@ large control surface.
   delay) and feeds its encoded access units into the shared RTP packetizer and
   output-socket helpers.
 - The source-built `libsns_imx662.so` is included under
-  `sensors/cv610/imx662/` and staged separately from the proprietary runtime
-  libraries.
+  `sensors/cv610/imx662/`, staged separately from the proprietary runtime
+  libraries, and installed at `/usr/lib/cv610/` rather than
+  `/usr/lib/sensors/`, where an OpenIPC image puts its own copy.
 - `GET /api/v1/snapshot.jpg` serves a JPEG from a dedicated VENC channel bound
   as a **second destination** on the same VPSS output the H.265 channel
   consumes (`OT_MAX_BIND_DST_NUM` is 4). The channel is created once and left
@@ -107,8 +109,9 @@ make sensor-cv610 SOC_BUILD=cv610 \
   CV610_SDK_LIB=/path/to/cv610/rootfs/usr/lib
 ```
 
-Install `out/cv610/waybeam` as `/usr/bin/waybeam`, the plugin as
-`/usr/lib/sensors/libsns_imx662.so`, and start with
+Install `out/cv610/waybeam` as `/usr/bin/waybeam`, the plugin
+`out/cv610/cv610/libsns_imx662.so` as `/usr/lib/cv610/libsns_imx662.so`, and
+start with
 `config/waybeam.default.cv610.json`. `make stage` also emits the tested CV610
 init script and platform profile:
 
@@ -134,7 +137,8 @@ Three operator rules follow from that:
 - **Recovery after an abnormal exit is a plain `S95waybeam start`.** The
   modules are still loaded and the daemon re-initialises against them; there
   is no `reload` action and no module rollback on a failed start.
-- **Changing `CV610_AUDIO` or `CV610_SENSOR_PROFILE` needs a reboot.** The
+- **Changing `CV610_AUDIO`, `CV610_SENSOR_PROFILE` or the MMZ needs a
+  reboot.** The
   loader refuses to re-load a differing module set over a live one.
 - **A boot that has seen a hard kill cannot be unloaded cleanly.** Reboot
   rather than fighting it.
@@ -160,12 +164,74 @@ Audio remains a separate RTP/UDP side channel: UDP video uses the configured
 remote host, while local `unix://` or `frame-shm://` video sends audio to the
 co-located Waybeam Link listener on `127.0.0.1:<audioPort>`.
 
+## Sensor selection
+
+The sensor is a userspace plugin the daemon `dlopen`s, so which part a craft
+runs is chosen at bring-up, from `$SENSOR`: the u-boot `sensor` name. OpenIPC's
+rcS exports it and its module loader (`load_hisilicon`) brings the sensor up by
+it; `S95waybeam` asks `fw_printenv -n sensor`, then `ipcinfo --short-sensor`,
+when started without it. There is no config field — on OpenIPC's loader one
+could only disagree with the modules the craft loaded — so switching parts is
+`fw_setenv sensor <name>` and a reboot. Bring-up logs the choice:
+
+```
+> CV610 sensor: imx335 (/usr/lib/sensors/libsns_imx335.so)
+```
+
+A missing or unknown name comes up as IMX662, with a `WARNING` quoting what
+`$SENSOR` held. `src/cv610_modes.c` holds one row per sensor:
+
+| `$SENSOR` | plugin | from | modes |
+|---|---|---|---|
+| `imx662` | `/usr/lib/cv610/libsns_imx662.so` | this tree (`sensors/cv610/imx662`) | 1080p30/60 RAW12, 1080p90/100 RAW10 |
+| `imx335` | `/usr/lib/sensors/libsns_imx335.so` | the image (OpenIPC/openhisilicon `sony_imx335`) | 2592x1944p30 RAW12, 1296x972p60 binned, 1080p90 crop, 2592x1944p40, 2592x1520p30 crop |
+
+IMX662 stays waybeam's own because 1080p100 needs the daemon's clock switch
+(see "Sensor clock") and the image's copy refuses that mode. `make stage`
+puts it in `out/cv610/cv610/`; a firmware package must install it to
+`/usr/lib/cv610/`, out of reach of the image's copy in `/usr/lib/sensors/`.
+
+IMX335 needs no workaround in the plugin: every mode runs on 37.125 MHz and
+`pub.sns_mode` stays 0 ("auto"), the plugin picking its mode from the exact
+capture size and a rate inside the mode's range, which tells the five rows
+apart. Its flexible window crop has no fixed size and is not listed. What it
+needs from the craft:
+
+- **An image that ships the plugin**: OpenIPC hi3516cv6xx `ultimate` (the
+  `lite` image filters it out), with OpenIPC/openhisilicon#284/#288 for
+  `image.mirror`/`image.flip`. Vertical flip is refused in the two crop
+  windows (1080p90, 2592x1520p30) — the plugin logs it and the
+  `/api/v1/modes` labels say so — so an inverted IMX335 craft wants a full-
+  frame or binned mode.
+- **The right clock on waybeam's own loader.** `load-cv610-online` loads the
+  modules by `CV610_SENSOR_PROFILE`, a boot clock, not by `$SENSOR`; the
+  daemon then sets each mode's clock through `sns0_clk_hz`. Without that
+  parameter the IMX335 stays on the profile's clock (27 MHz for the default
+  `sc4336p`) and runs slow. Keep the profile at a name the craft's sys_config
+  knows — `sc4336p` always is.
+- **Enough MMZ for the 2592-wide rows.** VB is sized from the capture: the
+  2592x1944 and 2592x1520 rows need about 60–80 MiB, more than
+  `load-cv610-online`'s default 64 MiB MMZ (which also holds the ISP and
+  VENC buffers), so on that loader they fail `vb` init — and a `/set` that
+  selects one takes the daemon down at the restart it triggers. The binned
+  and 1080p crop rows need about 20–35 MiB. On the reference 128 MiB board
+  that MMZ (0x44000000 + 64 MiB) already reaches the top of RAM above the
+  kernel's `mem=64M`, so it cannot simply grow: a bigger one means a smaller
+  kernel `mem=`/`osmem` and `CV610_MMZ_START`/`CV610_MMZ_SIZE` moved with it,
+  all in `/etc/waybeam-cv610.conf` and the u-boot env together. OpenIPC's own
+  loader sizes MMZ from the u-boot env instead.
+
+The IMX335 rows were verified on hardware by DmtryJS (#126/#127) on a stock
+OpenIPC image's loader and memory layout, not on `load-cv610-online`.
+
 ## Sensor modes
 
-`video0.fps` selects a sensor mode; `video0.size` is the encoded size. They
-are independent because VPSS sits between VI and VENC and scales: the sensor
-always captures 1920x1080, and any smaller encoded geometry is produced by
-the scaler. This is the same split SigmaStar gets from its VPE SCL ports.
+`video0.fps` selects a sensor mode; `video0.size` is the encoded size, which
+VPSS (between VI and VENC) scales the capture down to — the same split
+SigmaStar gets from its VPE SCL ports. The size only narrows which modes the
+rate is matched among, those whose capture covers it: on IMX335, 720p60 runs the binned mode, 1080p60 the 1080p90 crop (the
+binned capture is smaller than 1080p), and 30 fps the full 5 MP RAW12 capture,
+the first row at that rate. `sensor.mode=4` picks the 2592x1520 crop instead.
 
 VPSS is created even when no scaling is asked for, so the 1:1 path and a
 scaled one exercise the same graph and the same teardown order.
@@ -187,17 +253,19 @@ capture size, and both dimensions required. Note the shared validator
 additionally requires a multiple of 8 in each dimension, so 960x540 is
 rejected on the height.
 
-`src/cv610_modes.c` holds the whole table — capture geometry, frame rate,
+`src/cv610_modes.c` holds the tables — capture geometry, frame rate,
 MIPI RAW bit depth, and the input clock the mode's line timing assumes.
 Everything derives from it: `cv610_validate_config()` rejects anything that
 does not resolve, `cv610_prepare()` takes the bit depth and clock from the
 resolved mode, and `GET /api/v1/modes` is generated from it, so what that
-endpoint lists is exactly what `/api/v1/set` accepts. It mirrors
-`g_imx662_mode_tbl` in `sensors/cv610/imx662/imx662_cmos.c`, which is the
-sensor-side original; adding a mode means editing both. The geometry listed
-by `/api/v1/modes` is what the sensor captures, not the encoded size.
+endpoint lists is exactly what `/api/v1/set` accepts — for the sensor
+`$SENSOR` names. Each table mirrors its plugin's own (`g_imx662_mode_tbl` in
+`sensors/cv610/imx662/imx662_cmos.c`, `mode_tbl[]` in openhisilicon's
+`sony_imx335`); adding a mode means editing both. The geometry listed by
+`/api/v1/modes` is what the sensor captures, not the encoded size.
 
-A zero `video0.size` (`auto`) means the mode's own capture size. A half-set
+A zero `video0.size` (`auto`) means the mode's own capture size, rounded
+down to a multiple of 8 (IMX335's binned 1296x972 encodes 1296x968). A half-set
 one (`1920x0`) is rejected rather than completed — it is a typo, not a
 request.
 

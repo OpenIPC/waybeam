@@ -82,7 +82,7 @@ jobs:
           test -x out/cv610/load-cv610-online
           test -f out/cv610/waybeam.json
           test -f out/cv610/waybeam-cv610.conf
-          test -f out/cv610/sensors/libsns_imx662.so
+          test -f out/cv610/cv610/libsns_imx662.so
 
   # ── Full build + artifact upload ────────────────────────────────────
 

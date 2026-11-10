@@ -6,7 +6,7 @@
 #include "cv610_pipeline.h"
 
 #include "pipeline_common.h"
-/* Minimal Hi3516CV610 + IMX662 MIPI/VI/ISP graph. The target's MPP module
+/* Minimal Hi3516CV610 MIPI/VI/ISP graph for one sensor (cv610_modes.c). The target's MPP module
  * loader and sensor-clock prerequisites are documented in
  * docs/CV610_BACKEND.md. VENC and output ownership stay in cv610_runtime.c. */
 
@@ -43,10 +43,6 @@
 #include "ss_mpi_awb.h"
 
 #define MIPI_DEV_NODE       "/dev/ot_mipi_rx"
-#define SNS_LIB_PATH        "/usr/lib/sensors/libsns_imx662.so"
-#define SNS_OBJ_SYMBOL      "g_sns_imx662_obj"
-/* Must match IMX662_ID in the sensor driver (imx662_cmos_param.h). */
-#define IMX662_SNS_ID       662
 
 #define VI_DEV              0
 #define VI_PIPE             0
@@ -95,6 +91,7 @@ typedef struct {
 	int          vi_online;    /* VI -> ISP online/realtime mode */
 	int          mirror;       /* image.mirror: sensor H reverse */
 	int          flip;         /* image.flip:   sensor V reverse */
+	const Cv610Sensor *sensor; /* plugin to load, id the ISP binds */
 } Cv610PipelineRuntimeConfig;
 
 static volatile sig_atomic_t g_stop;
@@ -457,21 +454,22 @@ static ot_isp_sns_obj  *g_sns_obj;
 static ot_isp_3a_alg_lib g_ae_lib  = { .id = VI_PIPE, .lib_name = "ot_ae_lib"  };
 static ot_isp_3a_alg_lib g_awb_lib = { .id = VI_PIPE, .lib_name = "ot_awb_lib" };
 
-static int sensor_setup(int i2c_bus)
+static int sensor_setup(const Cv610Sensor *sensor, int i2c_bus)
 {
 	ot_isp_sns_commbus bus;
 
-	g_sns_handle = dlopen(SNS_LIB_PATH, RTLD_NOW | RTLD_GLOBAL);
+	g_sns_handle = dlopen(sensor->plugin_path, RTLD_NOW | RTLD_GLOBAL);
 	if (g_sns_handle == NULL) {
-		fprintf(stderr, "dlopen %s: %s\n", SNS_LIB_PATH, dlerror());
+		fprintf(stderr, "dlopen %s: %s\n", sensor->plugin_path, dlerror());
 		return -1;
 	}
-	g_sns_obj = (ot_isp_sns_obj *)dlsym(g_sns_handle, SNS_OBJ_SYMBOL);
+	g_sns_obj = (ot_isp_sns_obj *)dlsym(g_sns_handle, sensor->obj_symbol);
 	if (g_sns_obj == NULL) {
-		fprintf(stderr, "dlsym %s: %s\n", SNS_OBJ_SYMBOL, dlerror());
+		fprintf(stderr, "dlsym %s: %s\n", sensor->obj_symbol, dlerror());
 		return -1;
 	}
-	printf("  ok  dlopen %s -> %s @ %p\n", SNS_LIB_PATH, SNS_OBJ_SYMBOL, (void *)g_sns_obj);
+	printf("  ok  dlopen %s -> %s @ %p\n", sensor->plugin_path,
+		sensor->obj_symbol, (void *)g_sns_obj);
 
 	if (g_sns_obj->pfn_set_bus_info != NULL) {
 		bus.i2c_dev = (td_s8)i2c_bus;
@@ -519,7 +517,7 @@ static int isp_setup(const Cv610PipelineRuntimeConfig *c)
 	/* Tell the ISP which registered 3A libs and which sensor this pipe uses;
 	 * without it isp_mem_init cannot resolve the sensor and fails NOT_CFG. */
 	memset(&bind, 0, sizeof(bind));
-	bind.sns_id  = IMX662_SNS_ID;
+	bind.sns_id  = (ot_sensor_id)c->sensor->sns_id;
 	bind.ae_lib  = g_ae_lib;
 	bind.awb_lib = g_awb_lib;
 	CV610_CHECK(ss_mpi_isp_set_bind_attr(VI_PIPE, &bind));
@@ -794,7 +792,7 @@ int cv610_pipeline_start(const Cv610PipelineConfig *config)
 {
 	Cv610PipelineRuntimeConfig c;
 
-	if (config == NULL) {
+	if (config == NULL || config->sensor == NULL) {
 		return -1;
 	}
 	memset(&c, 0, sizeof(c));
@@ -812,6 +810,7 @@ int cv610_pipeline_start(const Cv610PipelineConfig *config)
 	c.vi_online = config->vi_online;
 	c.mirror = config->mirror ? 1 : 0;
 	c.flip = config->flip ? 1 : 0;
+	c.sensor = config->sensor;
 	g_stop = 0;
 
 	printf("== cv610 sys/vb ==\n");
@@ -827,7 +826,8 @@ int cv610_pipeline_start(const Cv610PipelineConfig *config)
 		return -1;
 	}
 	printf("== cv610 sensor/isp ==\n");
-	if (sensor_setup(config->i2c_bus) != 0 || isp_setup(&c) != 0 ||
+	if (sensor_setup(c.sensor, config->i2c_bus) != 0 ||
+		isp_setup(&c) != 0 ||
 		configure_output_color() != 0) {
 		return -1;
 	}

@@ -4321,9 +4321,10 @@ static int handle_modes(int fd, const HttpRequest *req, void *ctx)
 #if HAVE_BACKEND_CV610
 	/* Generated from the same table cv610_validate_config() rejects
 	 * against, so what this lists is exactly what /set accepts. */
-	size_t count = 0;
+	const Cv610Sensor *sensor = cv610_sensor_current();
+	const Cv610SensorMode *modes = sensor->modes;
+	size_t count = sensor->mode_count;
 	size_t i;
-	const Cv610SensorMode *modes = cv610_mode_table(&count);
 	int selected, selected_pad;
 	cJSON *root, *data, *pads, *pad, *arr;
 	char *str;

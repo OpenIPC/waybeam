@@ -390,8 +390,8 @@ stage: build qr-decode
 	@set -e; if [ "$(SOC_BUILD)" = "cv610" ]; then \
 		$(MAKE) sensor-cv610 SOC_BUILD=cv610 \
 			CV610_CC="$(CV610_CC)" CV610_SDK_INC="$(CV610_SDK_INC)"; \
-		mkdir -p $(OUT_DIR)/sensors; \
-		cp -f sensors/cv610/imx662/libsns_imx662.so $(OUT_DIR)/sensors/; \
+		mkdir -p $(OUT_DIR)/cv610; \
+		cp -f sensors/cv610/imx662/libsns_imx662.so $(OUT_DIR)/cv610/; \
 		cp -f config/waybeam.default.cv610.json $(OUT_DIR)/waybeam.json; \
 		cp -f init.d/S95waybeam.cv610 $(OUT_DIR)/S95waybeam; \
 		chmod +x $(OUT_DIR)/S95waybeam; \

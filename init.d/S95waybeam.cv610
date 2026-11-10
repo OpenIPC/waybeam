@@ -17,9 +17,15 @@ WAYBEAM_ENABLED=1
 # clock for the selected mode at bring-up via sns0_clk_hz, so this matters
 # solely against a sys_config too old to expose that parameter, where it must
 # match video0.fps (sc4336p = 27 MHz for 100 fps, imx662 = 37.125 MHz for
-# 30/60/90).  It names a clock profile, not the sensor -- that is an IMX662.
+# 30/60/90).  It names a clock profile, not the sensor: the daemon takes the
+# sensor from $SENSOR (see start()).  Keep it a name the craft's sys_config
+# knows; sc4336p always is.
 CV610_SENSOR_PROFILE=sc4336p
 CV610_AUDIO=0
+# MMZ placement for the loader; empty keeps its defaults (0x44000000, 64M).
+# See the platform conf before changing either.
+CV610_MMZ_START=
+CV610_MMZ_SIZE=
 # The platform override is target-local by design.
 # shellcheck disable=SC1090
 [ -r "$PLATFORM_CONFIG" ] && . "$PLATFORM_CONFIG"
@@ -46,7 +52,16 @@ start()
 		rm -f "$PIDFILE"
 	fi
 	CV610_SENSOR_PROFILE="$CV610_SENSOR_PROFILE" \
+		CV610_MMZ_START="$CV610_MMZ_START" CV610_MMZ_SIZE="$CV610_MMZ_SIZE" \
 		CV610_AUDIO="$CV610_AUDIO" "$LOADER" start || return 1
+	# The daemon picks its sensor plugin and mode table from $SENSOR, the
+	# u-boot `sensor` name.  rcS exports it at boot; a start from a context
+	# that did not inherit it (a non-login ssh command, a script) asks where
+	# rcS and OpenIPC's loader do.  Unset, the daemon warns and assumes
+	# IMX662.
+	[ -n "${SENSOR:-}" ] || SENSOR=$(fw_printenv -n sensor 2>/dev/null)
+	[ -n "${SENSOR:-}" ] || SENSOR=$(ipcinfo --short-sensor 2>/dev/null)
+	export SENSOR
 	: >"$LOGFILE"
 	start-stop-daemon -S -m -q -p "$PIDFILE" -x "$DAEMON" -- \
 		>>"$LOGFILE" 2>&1 &

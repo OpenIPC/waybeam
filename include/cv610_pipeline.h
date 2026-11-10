@@ -3,7 +3,11 @@
 
 #include <stdint.h>
 
+#include "cv610_modes.h"
+
 typedef struct {
+	/* Which plugin to dlopen and which sensor id the ISP binds. */
+	const Cv610Sensor *sensor;
 	/* Sensor capture geometry (what VI and the ISP see). */
 	uint32_t width;
 	uint32_t height;
@@ -38,7 +42,7 @@ typedef struct {
 	int i2c_bus;
 } Cv610PipelineConfig;
 
-/* Start the hardware-verified IMX662 MIPI -> VI -> ISP graph. */
+/* Start the MIPI -> VI -> ISP graph for config->sensor. */
 int cv610_pipeline_start(const Cv610PipelineConfig *cfg);
 
 /* Stop the ISP thread and release sensor, VI, SYS, and VB resources. */

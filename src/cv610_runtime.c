@@ -2174,14 +2174,23 @@ static int cv610_prepare(void *opaque)
 {
 	Cv610RunnerContext *ctx = opaque;
 	VencConfig *cfg = &ctx->config;
+	const Cv610Sensor *sensor = cv610_sensor_current();
+	const char *hint = getenv("SENSOR");
 	const Cv610SensorMode *mode;
 	int mode_index = -1;
 
 	setvbuf(stdout, NULL, _IONBF, 0);
+	/* The only record of which part this run drives, and of why when the
+	 * system named none this backend has a plugin for. */
+	if (cv610_sensor_find(hint) == NULL)
+		fprintf(stderr, "WARNING: SENSOR=\"%s\" is not a CV610 sensor waybeam "
+			"drives; assuming %s\n", hint ? hint : "", sensor->name);
+	printf("> CV610 sensor: %s (%s)\n", sensor->name, sensor->plugin_path);
 	/* Config loading and every staged HTTP mutation run the same lookup
 	 * through cv610_validate_config(), so reaching this is a config file
 	 * edited behind the daemon's back. */
-	mode = cv610_mode_select(cfg->sensor.mode, cfg->video0.fps, &mode_index);
+	mode = cv610_mode_select(sensor, cfg->sensor.mode, cfg->video0.fps,
+		cfg->video0.width, cfg->video0.height, &mode_index);
 	if (mode == NULL || cv610_mode_check_output(mode, cfg->video0.width,
 			cfg->video0.height) != NULL) {
 		fprintf(stderr, "ERROR: CV610 cannot encode %ux%u @ %u fps\n",
@@ -2199,6 +2208,7 @@ static int cv610_prepare(void *opaque)
 	 * achieved mode rather than recomputing the configured one — the same
 	 * contract star6e_pipeline.c fulfils after sensor_select(). */
 	venc_api_set_sensor_info(0, mode_index, cfg->sensor.index);
+	ctx->pipeline.sensor = sensor;
 	ctx->pipeline.width = mode->width;
 	ctx->pipeline.height = mode->height;
 	cv610_mode_resolve_output(mode, cfg->video0.width, cfg->video0.height,
@@ -2227,7 +2237,7 @@ static int cv610_prepare(void *opaque)
 			cfg->outgoing.server);
 		return 1;
 	}
-	printf("> CV610/IMX662 backend selected (initial streaming slice)\n");
+	printf("> CV610 backend selected (initial streaming slice)\n");
 	return 0;
 }
 
