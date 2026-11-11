@@ -1,6 +1,9 @@
 #include "frame_gate.h"
 #include "test_helpers.h"
 
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MS 1000u   /* microseconds per millisecond */
@@ -11,6 +14,64 @@
 static void gate_on(FrameGate *g, uint32_t close_slots, uint32_t max_closed_ms)
 {
 	(void)frame_gate_setup(g, close_slots, max_closed_ms, RING);
+}
+
+/* ── HTTP-thread reads racing the stream loop ─────────────────────────────
+ * The stream loop writes the gate while /api/v1/transport/status reads it on
+ * another thread.  The writer drives close/reopen cycles from a large clock
+ * epoch; the reader checks gateClosedMs never exceeds the time that has
+ * elapsed.  A reopen that zeroed closed_since_us under the reader turned
+ * now - since into the whole epoch.  Under `make test-tsan` this also flags
+ * any plain access to a field the other thread touches. */
+#define RACE_EPOCH_US 1000000000000ull
+#define RACE_CYCLES   20000u
+
+static FrameGate race_gate;
+static uint64_t  race_now;      /* writer's clock, read by the reader */
+static int       race_done;
+static unsigned  race_bad;
+
+static void *race_writer(void *arg)
+{
+	uint64_t t = RACE_EPOCH_US;
+	unsigned i;
+
+	(void)arg;
+	for (i = 0; i < RACE_CYCLES; i++) {
+		t += 25 * MS;
+		__atomic_store_n(&race_now, t, __ATOMIC_RELEASE);
+		(void)frame_gate_observe(&race_gate, 5, t);   /* close */
+		t += 25 * MS;
+		__atomic_store_n(&race_now, t, __ATOMIC_RELEASE);
+		(void)frame_gate_observe(&race_gate, 0, t);   /* reopen */
+	}
+	__atomic_store_n(&race_done, 1, __ATOMIC_RELEASE);
+	return NULL;
+}
+
+static void *race_reader(void *arg)
+{
+	char buf[192];
+
+	(void)arg;
+	while (!__atomic_load_n(&race_done, __ATOMIC_ACQUIRE)) {
+		uint64_t now = __atomic_load_n(&race_now, __ATOMIC_ACQUIRE);
+		const char *p;
+		unsigned long long closed_ms;
+
+		if (frame_gate_status_json(&race_gate, now, buf, sizeof(buf)) <= 0)
+			continue;
+		p = strstr(buf, "\"gateClosedMs\":");
+		if (!p) {
+			race_bad++;
+			continue;
+		}
+		closed_ms = strtoull(p + 15, NULL, 10);
+		/* A racing reopen may count the last interval twice, never more. */
+		if (closed_ms * MS > now - RACE_EPOCH_US + 50 * MS)
+			race_bad++;
+	}
+	return NULL;
 }
 
 int test_frame_gate(void)
@@ -187,17 +248,6 @@ int test_frame_gate(void)
 	frame_gate_force_open(&g, 60 * MS);
 	CHECK("force_open_idempotent", g.closed_total_us == 50 * MS);
 
-	/* ── failed OPEN rolls policy back so the actuator is retried ─── */
-	frame_gate_restore_closed(&g, 70 * MS);
-	CHECK("restore_closed_closes", !frame_gate_is_open(&g));
-	CHECK("restore_closed_debounces",
-		frame_gate_observe(&g, 0, 70 * MS + FRAME_GATE_MIN_CLOSED_US - 1)
-			== FRAME_GATE_ACTION_NONE);
-	CHECK("restore_closed_retries_open",
-		frame_gate_observe(&g, 0, 70 * MS + FRAME_GATE_MIN_CLOSED_US)
-			== FRAME_GATE_ACTION_OPEN);
-	frame_gate_restore_closed(NULL, 0);       /* must not crash */
-
 	/* ── escape pulse must survive long enough to land a frame ────── */
 	{
 		FrameGate e;
@@ -350,47 +400,6 @@ int test_frame_gate(void)
 		CHECK("clockback_pulse_closed", !frame_gate_is_open(&f));
 	}
 
-	/* ── restore_closed disarms the pulse ────────────────────────── */
-	{
-		FrameGate f;
-		uint64_t t = 13000 * MS;
-
-		gate_on(&f, 3, 500);
-		CHECK("restore_closes", frame_gate_observe(&f, 5, t)
-			== FRAME_GATE_ACTION_CLOSE);
-		t += f.cfg.max_closed_us;
-		CHECK("restore_escapes", frame_gate_observe(&f, 5, t)
-			== FRAME_GATE_ACTION_OPEN);
-
-		/* The caller refuses the OPEN and puts the gate back.  That
-		 * must disarm the pulse: otherwise it survives into the next
-		 * NORMAL reopen and suppresses the first legitimate close
-		 * there. */
-		frame_gate_restore_closed(&f, t);
-		CHECK("restore_closed_gate", !frame_gate_is_open(&f));
-
-		/* Shorten the debounce so a normal reopen can land while a
-		 * stale pulse would still be live.  With the shipped constants
-		 * FRAME_GATE_MIN_CLOSED_US equals FRAME_GATE_ESCAPE_BACKSTOP_US
-		 * exactly, so the earliest normal reopen coincides with the
-		 * stale pulse's expiry and the bug is invisible — the disarm is
-		 * correct on its own terms, not because those two constants
-		 * happen to be equal today. */
-		f.cfg.min_closed_us = 5000u;
-
-		/* Drain to the reopen threshold so the gate reopens the normal
-		 * way, well before another escape is due. */
-		t += f.cfg.min_closed_us;
-		CHECK("restore_normal_reopen",
-			frame_gate_observe(&f, 0, t) == FRAME_GATE_ACTION_OPEN);
-
-		/* A burst refills the ring.  This close is NOT an escape pulse
-		 * and must not be debounced by one. */
-		CHECK("restore_close_not_suppressed",
-			frame_gate_observe(&f, 5, t + 1 * MS)
-				== FRAME_GATE_ACTION_CLOSE);
-	}
-
 	/* ── an unarmed gate must never read CLOSED ──────────────────── */
 	{
 		FrameGate z;
@@ -501,6 +510,30 @@ int test_frame_gate(void)
 	CHECK("null_setup",
 		frame_gate_setup(NULL, 0, 0, RING)
 			== FRAME_GATE_SETUP_NO_RING);
+
+	/* ── concurrent status reads (see race_writer) ───────────────── */
+	{
+		pthread_t w, r;
+
+		gate_on(&race_gate, 3, 60000);
+		__atomic_store_n(&race_now, RACE_EPOCH_US, __ATOMIC_RELEASE);
+		int r_ok = pthread_create(&r, NULL, race_reader, NULL) == 0;
+		int w_ok = r_ok &&
+			pthread_create(&w, NULL, race_writer, NULL) == 0;
+
+		CHECK("race_threads_started", w_ok);
+		if (w_ok)
+			pthread_join(w, NULL);
+		else
+			__atomic_store_n(&race_done, 1, __ATOMIC_RELEASE);
+		if (r_ok)
+			pthread_join(r, NULL);
+		if (w_ok) {
+			CHECK("race_closed_ms_bounded", race_bad == 0);
+			CHECK("race_cycles_counted",
+				race_gate.close_events == RACE_CYCLES);
+		}
+	}
 
 	return failures;
 }

@@ -1521,10 +1521,13 @@ static int star6e_pipeline_start_venc(uint32_t width, uint32_t height,
 	}
 
 	/* Cap the bitstream buffer before encoding starts — see
-	 * FRAME_GATE_STREAM_BUF_FRAMES.  Advisory: an older libmi_venc.so
+	 * FRAME_GATE_STREAM_BUF_FRAMES.  ch0 only (vcfg is NULL for dual ch1):
+	 * the gate never acts on ch1, whose recorder keeps the SDK default
+	 * depth to absorb a storage stall.  Advisory: an older libmi_venc.so
 	 * without the symbol, or a refusal, just leaves the SDK default of 3,
 	 * which costs latency while gated but nothing else. */
-	if (MI_VENC_SetMaxStreamCnt(*chn, FRAME_GATE_STREAM_BUF_FRAMES) != 0)
+	if (vcfg &&
+	    MI_VENC_SetMaxStreamCnt(*chn, FRAME_GATE_STREAM_BUF_FRAMES) != 0)
 		fprintf(stderr, "WARNING: SetMaxStreamCnt(%u) refused; "
 			"keeping the SDK default depth\n",
 			FRAME_GATE_STREAM_BUF_FRAMES);

@@ -30,12 +30,12 @@ The guards that would have caught the original defects:
 - `test_venc_api`: `frame gate close slots/max closed supported cv610` (plus
   alias, star6e and maruko crosses). Before the fix these returned 0 for CV610.
 
-CV610 lint needs the OpenHisilicon SDK headers and libs; on this machine:
+CV610 lint needs the OpenHisilicon SDK headers and libs:
 
 ```
 make lint SOC_BUILD=cv610 \
-  CV610_SDK_INC=/home/snokvist/dev/hisilicon/oh \
-  CV610_SDK_LIB=/home/snokvist/dev/hisilicon/firmware/output-cv6xx/per-package/hisilicon-opensdk/target/usr/lib
+  CV610_SDK_INC=<openhisilicon checkout> \
+  CV610_SDK_LIB=<firmware output>/per-package/hisilicon-opensdk/target/usr/lib
 ```
 
 ## 2. Hardware verification
@@ -52,11 +52,11 @@ three fixes touch it.
 
 Craft with `libbin.so` staged. `make stage SOC_BUILD=cv610` skips the vendor
 lib unless `CV610_PQ_LIB` is overridden (its default `../hisilicon/...` does
-not exist in this checkout); point it at the local vendor copy:
+not exist in this checkout); point it at a local vendor copy:
 
 ```sh
 make stage SOC_BUILD=cv610 \
-  CV610_PQ_LIB=/home/snokvist/dev/hisilicon/vendor/pq/libbin.so
+  CV610_PQ_LIB=<vendor pq dir>/libbin.so
 ```
 
 ```sh
