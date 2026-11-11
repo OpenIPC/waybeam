@@ -174,9 +174,7 @@ FrameGateSetupStatus frame_gate_setup(FrameGate *g,
  * cadence for an external rate controller and far too slow to catch a burst.
  *
  * Returns the action taken.  Backends need not apply it: the policy flip IS
- * the actuator, since the drain loop consults frame_gate_is_open().  The
- * return value and the force_open()/restore_closed() rollbacks remain for a
- * backend that ever does drive hardware here. */
+ * the actuator, since the drain loop consults frame_gate_is_open(). */
 FrameGateAction frame_gate_observe(FrameGate *g, uint32_t used_slots,
 	uint64_t now_us);
 
@@ -247,10 +245,6 @@ int frame_gate_status_json(const FrameGate *g, uint64_t now_us,
  * the separate pathology fixed in 0.85.1: every close follows an escape, so
  * the gate never reopens through the drain path at all. */
 
-/* Restore the closed policy state after the actuator refused an OPEN.  The
- * next observation retries after min_closed_us instead of leaving policy
- * open while encoder intake is still stopped. */
-void frame_gate_restore_closed(FrameGate *g, uint64_t now_us);
 
 /* The drain predicate.  An unarmed gate is OPEN, never closed: a zeroed or
  * never-set-up FrameGate would otherwise read closed, and the backends would

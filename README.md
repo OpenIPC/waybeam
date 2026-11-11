@@ -741,9 +741,10 @@ The delay is **the encoder's bitstream buffer depth times the consumer's frame
 period**, measured as a near-constant ~5.2 consumer-frame-intervals: 4.1 ms
 ungated, 170 ms against a 30 fps drain, 538 ms against 10 fps. The egress ring
 holds only 1.5 of those frames; the rest is VENC's own buffer, whose default
-depth is 3 (`MI_VENC_SetMaxStreamCnt`). Capping it at 1 measured a 37-39 %
-latency cut with no change to delivered rate — an open follow-up, not yet
-shipped.
+depth is 3 (`MI_VENC_SetMaxStreamCnt`). It is capped at 2
+(`FRAME_GATE_STREAM_BUF_FRAMES`, all three backends; Star6E dual ch1 keeps the
+default), which took the 10 fps case from 534 to 436 ms with no change to
+delivered rate.
 
 Under sustained partial congestion it settles at the link rate rather than
 oscillating: against a rate-limited consumer the delivered rate tracked 20,

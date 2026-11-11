@@ -457,8 +457,8 @@ static const FieldUi ui_pause_stab = {
 	"framing=off or zoom."
 };
 
-/* UI descriptors for the RC QP bounds.  Rendered purely from capabilities —
- * these were API-only (no static SECTIONS rows). */
+/* UI descriptors for the adaptive frame gate thresholds.  Rendered purely
+ * from capabilities — these are API-only (no static SECTIONS rows). */
 static const FieldUi ui_frame_gate_close_slots = {
 	"Video", "Frame gate close slots", "number", 0, 64, 1, NULL,
 	"Egress ring occupancy, in slots, at which the gate closes. 0 = "
