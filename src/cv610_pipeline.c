@@ -6,9 +6,9 @@
 #include "cv610_pipeline.h"
 
 #include "pipeline_common.h"
-/* Minimal Hi3516CV610 MIPI/VI/ISP graph for one sensor (cv610_modes.c). The target's MPP module
- * loader and sensor-clock prerequisites are documented in
- * docs/CV610_BACKEND.md. VENC and output ownership stay in cv610_runtime.c. */
+/* Minimal Hi3516CV610 MIPI/VI/ISP graph for one sensor (cv610_modes.c).  The
+ * target's MPP module loader and sensor-clock prerequisites are documented in
+ * docs/CV610_BACKEND.md.  VENC and output ownership stay in cv610_runtime.c. */
 
 #include <stdio.h>
 #include <stdlib.h>

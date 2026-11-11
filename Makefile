@@ -419,7 +419,6 @@ stage: build qr-decode
 			echo "         Set CV610_PQ_LIB to stage it."; \
 		fi; \
 		if [ -f drivers/cv610/build/open_sys_config_imx662.ko ]; then \
-			mkdir -p $(OUT_DIR)/cv610; \
 			cp -f drivers/cv610/build/*.ko $(OUT_DIR)/cv610/; \
 			echo "  stage: CV610 kernel modules from drivers/cv610/build"; \
 		else \

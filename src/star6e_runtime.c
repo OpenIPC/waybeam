@@ -1526,7 +1526,7 @@ static void star6e_service_ring_low_water(Star6eOutput *output)
 }
 
 /* Report what frame_gate_setup() made of the config.  The checks live in
- * frame_gate.c so the two backends cannot drift; only the wording is local. */
+ * frame_gate.c so the backends cannot drift; only the wording is local. */
 static void star6e_report_frame_gate_setup(FrameGateSetupStatus st,
 	const FrameGate *g, uint32_t slot_count)
 {
@@ -1555,18 +1555,17 @@ static void star6e_report_frame_gate_setup(FrameGateSetupStatus st,
 
 /* ── Adaptive frame gate ─────────────────────────────────────────────────
  *
- * Pauses ch0's frame intake while the frame-shm egress ring is not draining,
- * and resumes it when the consumer catches up.  This is the IDR-free way to
- * shed load: MI_VENC_SetChnAttr (the only proportional rate actuator) emits a
- * keyframe of its own, so reacting to congestion with a bitrate write puts
- * the largest frame in the stream into an already overflowing link.
- * MI_VENC_StopRecvPic changes no encoder state at all — see
- * include/frame_gate.h and documentation/ADAPTIVE_FRAME_GATE_PLAN.md.
+ * Stops draining ch0's output FIFO while the frame-shm egress ring is not
+ * draining, and resumes when the consumer catches up.  This is the IDR-free
+ * way to shed load: MI_VENC_SetChnAttr (the only proportional rate actuator)
+ * emits a keyframe of its own, and so does a StopRecvPic/StartRecvPic cycle,
+ * whereas leaving frames in the FIFO makes no SDK call at all — see
+ * include/frame_gate.h.
  *
- * Called from two places in the stream loop: after a frame is sent (the
- * normal path) and from the "no packets yet" idle branch (the reopen path).
- * The second matters — while the gate is closed no frames are produced, so
- * the post-send call never runs and the gate could never let go.  The idle
+ * Called after a frame is sent (the normal path) and from the idle and gated
+ * branches of the stream loop (the reopen path).  The latter matter — while
+ * the gate is closed nothing is drained, so the post-send call never runs and
+ * the gate could never let go.  The idle
  * branch already polls at ~1 ms, which is finer than any frame period we
  * support, so no timer and no extra thread are needed. */
 static void star6e_service_frame_gate(Star6ePipelineState *ps)
@@ -1582,9 +1581,7 @@ static void star6e_service_frame_gate(Star6ePipelineState *ps)
 		 * than leaving the drain stopped with no occupancy signal that
 		 * could ever reopen it.  No SDK call: intake was never
 		 * stopped, only the drain. */
-		if (!frame_gate_is_open(&ps->frame_gate))
-			frame_gate_force_open(&ps->frame_gate,
-				wb_monotonic_us());
+		frame_gate_force_open(&ps->frame_gate, wb_monotonic_us());
 		return;
 	}
 

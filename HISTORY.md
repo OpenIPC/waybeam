@@ -1,6 +1,6 @@
 # History
 
-## [0.86.1] - 2026-11-10
+## [0.86.1] - 2026-11-11
 
 The kernel half of the CV610 sensor chain now lives here too, so 1080p100 is
 buildable from this tree rather than only from the snokvist/firmware
@@ -22,7 +22,7 @@ package that carried it.
   OpenIPC `hisilicon-hi3516cv6xx` kernel, so the patch cannot silently stop
   applying.
 
-## [0.86.0] - 2026-11-10
+## [0.86.0] - 2026-11-11
 
 **CV610 drives a Sony IMX335 as well as the IMX662**, chosen from the u-boot
 `sensor` name. No config field, no API change: `contract_version` is
@@ -94,6 +94,10 @@ whole-chain copy: **1080p100 stays**, on the 27 MHz clock the daemon selects.
   binary on musl, where libm is part of libc).
 - Not taken from upstream: its refusal of 100 fps, which assumes the stock
   37.125 MHz sys_config clock.
+- The plugin README records that OpenHisilicon has since replaced its copy
+  with the module vendor's driver (#296, 30/60/90 fps), which also uses a
+  black level of 800.
+
 ## [0.85.7] - 2026-11-11
 
 Fixes the findings of the upstream Qodo reviews of the 0.85.6 sync. No
@@ -131,6 +135,18 @@ contract change — `contract_version` stays **0.32.0**.
 - Removed `documentation/ADAPTIVE_FRAME_GATE_HANDOFF.md`: a bench-session
   handoff, not maintained reference. The gate's behaviour is documented in
   `include/frame_gate.h`, `HTTP_API_CONTRACT.md` and the earlier 0.85.x entries.
+- **Star6E dual ch1 no longer gets the 2-frame bitstream cap.** The gate only
+  acts on ch0, so the cap bought ch1's recorder nothing and cost it one frame
+  of storage-stall tolerance; ch1 is back on the SDK default depth.
+- A concurrency test in `test_frame_gate` runs status reads against a writer
+  thread. Mutation-checked: restoring the reopen's `closed_since_us = 0` fails
+  its bound check and draws a ThreadSanitizer race report.
+- Removed `frame_gate_restore_closed()`, which no backend called, and the
+  redundant open-check before each `frame_gate_force_open()`. Comments that
+  still described the retired `StopRecvPic` actuator now describe the drain
+  stall. The README's stream-buffer note says the cap shipped (it did, in
+  0.85.0); CV610's deferred-phases list drops the frame-SHM throttling item it
+  already has; `REVIEW_FIX_VERIFICATION.md` uses placeholder SDK paths.
 
 ## [0.85.6] - 2026-09-14
 

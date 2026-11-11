@@ -956,9 +956,7 @@ static void cv610_service_frame_gate(Cv610RunnerContext *ctx)
 	if (!ctx->frame_ring ||
 	    venc_frame_ring_get_fill(ctx->frame_ring, &fill) != 0) {
 		/* No SDK call: intake was never stopped, only the drain. */
-		if (!frame_gate_is_open(&ctx->frame_gate))
-			frame_gate_force_open(&ctx->frame_gate,
-				wb_monotonic_us());
+		frame_gate_force_open(&ctx->frame_gate, wb_monotonic_us());
 		return;
 	}
 
@@ -2277,15 +2275,16 @@ static int cv610_prepare(void *opaque)
 {
 	Cv610RunnerContext *ctx = opaque;
 	VencConfig *cfg = &ctx->config;
-	const Cv610Sensor *sensor = cv610_sensor_current();
 	const char *hint = getenv("SENSOR");
+	const Cv610Sensor *found = cv610_sensor_find(hint);
+	const Cv610Sensor *sensor = found ? found : cv610_sensor_current();
 	const Cv610SensorMode *mode;
 	int mode_index = -1;
 
 	setvbuf(stdout, NULL, _IONBF, 0);
 	/* The only record of which part this run drives, and of why when the
 	 * system named none this backend has a plugin for. */
-	if (cv610_sensor_find(hint) == NULL)
+	if (found == NULL)
 		fprintf(stderr, "WARNING: SENSOR=\"%s\" is not a CV610 sensor waybeam "
 			"drives; assuming %s\n", hint ? hint : "", sensor->name);
 	printf("> CV610 sensor: %s (%s)\n", sensor->name, sensor->plugin_path);
@@ -2984,9 +2983,8 @@ static int cv610_run(void *opaque)
 		ret = ss_mpi_venc_release_stream(CV610_VENC_CHN, &stream);
 		free(stream.pack);
 
-		/* Keep the gate transition outside the acquired-stream lifetime on
-		 * every backend.  CV610 tolerated stop_chn before release, but the
-		 * shared ordering avoids depending on that vendor-specific accident. */
+		/* Evaluate the gate after release, on the ring occupancy this
+		 * frame just produced — the same point as the other backends. */
 		cv610_service_frame_gate(ctx);
 
 		/* A recorder that stopped ITSELF (disk full, write error) does

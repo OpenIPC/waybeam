@@ -4527,8 +4527,8 @@ static void maruko_recorder_start_idr(MarukoBackendContext *ctx)
  * for the same reason.  Both backends share one definition on purpose: a
  * per-backend divergence in shared behaviour is a standing drift trap here. */
 /* Adaptive frame gate over chn 0 — the Maruko twin of
- * star6e_service_frame_gate().  Same rationale (a bitrate write implicitly
- * keyframes, StopRecvPic changes no encoder state) and the same signal, the
+ * star6e_service_frame_gate().  Same rationale (a bitrate write keyframes,
+ * leaving frames in the output FIFO does not) and the same signal, the
  * instantaneous egress-ring occupancy rather than the 200 ms low-water
  * window.  See include/frame_gate.h. */
 static void maruko_service_frame_gate(MarukoBackendContext *ctx)
@@ -4544,9 +4544,7 @@ static void maruko_service_frame_gate(MarukoBackendContext *ctx)
 		 * than leaving the drain stopped with no occupancy signal that
 		 * could ever reopen it.  No SDK call: intake was never
 		 * stopped, only the drain. */
-		if (!frame_gate_is_open(&ctx->frame_gate))
-			frame_gate_force_open(&ctx->frame_gate,
-				wb_monotonic_us());
+		frame_gate_force_open(&ctx->frame_gate, wb_monotonic_us());
 		return;
 	}
 
@@ -5006,10 +5004,8 @@ static int maruko_pipeline_process_stream(MarukoBackendContext *ctx,
 	(void)maruko_mi_venc_release_stream(ctx->venc_device,
 		ctx->venc_channel, &stream);
 
-	/* SigmaStar refuses StopRecvPic with MI_ERR_VENC_BUSY while an acquired
-	 * stream is outstanding.  The helper reads current ring occupancy, so
-	 * evaluating immediately after ReleaseStream preserves the same signal
-	 * while respecting the SDK lifetime contract. */
+	/* Evaluate the gate after ReleaseStream, on the ring occupancy this
+	 * frame just produced. */
 	maruko_service_frame_gate(ctx);
 
 	/* A recorder that stopped ITSELF (disk full, write error) does so on the

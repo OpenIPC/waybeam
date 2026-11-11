@@ -297,14 +297,13 @@ warns, names the clock the mode needs, and continues on the boot-time clock.
 1. Run a longer-duration soak beyond the bounded device matrices already
    completed.
 2. Add live output redirection and encoder output-FPS control.
-3. Add frame-SHM pressure metrics/throttling and sidecar parity.
-4. Dual VENC (`record.mode=dual` / `dual-stream`) — a second encoder channel
+3. Dual VENC (`record.mode=dual` / `dual-stream`) — a second encoder channel
    at its own bitrate/fps/GOP, needing a second VPSS channel, a drain thread
    and its own teardown ordering. Mirror-mode recording landed first, as this
    list prescribed; the remaining modes are refused with a warning rather than
    silently recording ch0. Stabilization likewise remains deferred. Add live
    audio gain/mute only after the analog control path can be operator-verified.
-5. Independent snapshot geometry (`snapshot.width`/`height`), which needs a
+4. Independent snapshot geometry (`snapshot.width`/`height`), which needs a
    dedicated VPSS scaler channel running continuously.
 
 Unsupported SigmaStar-only fields remain in the common configuration schema
