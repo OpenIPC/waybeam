@@ -37,6 +37,18 @@ contract change — `contract_version` stays **0.32.0**.
 - Removed `documentation/ADAPTIVE_FRAME_GATE_HANDOFF.md`: a bench-session
   handoff, not maintained reference. The gate's behaviour is documented in
   `include/frame_gate.h`, `HTTP_API_CONTRACT.md` and the earlier 0.85.x entries.
+- **Star6E dual ch1 no longer gets the 2-frame bitstream cap.** The gate only
+  acts on ch0, so the cap bought ch1's recorder nothing and cost it one frame
+  of storage-stall tolerance; ch1 is back on the SDK default depth.
+- A concurrency test in `test_frame_gate` runs status reads against a writer
+  thread. Mutation-checked: restoring the reopen's `closed_since_us = 0` fails
+  its bound check and draws a ThreadSanitizer race report.
+- Removed `frame_gate_restore_closed()`, which no backend called, and the
+  redundant open-check before each `frame_gate_force_open()`. Comments that
+  still described the retired `StopRecvPic` actuator now describe the drain
+  stall. The README's stream-buffer note says the cap shipped (it did, in
+  0.85.0); CV610's deferred-phases list drops the frame-SHM throttling item it
+  already has; `REVIEW_FIX_VERIFICATION.md` uses placeholder SDK paths.
 
 ## [0.85.6] - 2026-09-14
 
