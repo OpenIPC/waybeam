@@ -28,6 +28,10 @@ whole-chain copy: **1080p100 stays**, on the 27 MHz clock the daemon selects.
   binary on musl, where libm is part of libc).
 - Not taken from upstream: its refusal of 100 fps, which assumes the stock
   37.125 MHz sys_config clock.
+- The plugin README records that OpenHisilicon has since replaced its copy
+  with the module vendor's driver (#296, 30/60/90 fps), which also uses a
+  black level of 800.
+
 ## [0.85.7] - 2026-11-11
 
 Fixes the findings of the upstream Qodo reviews of the 0.85.6 sync. No

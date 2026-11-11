@@ -29,8 +29,9 @@
  * IMX335, sharing the 0x032 default, pairs it with 0x320 on this ISP, and
  * IMX415 with 200 on the 12-bit-domain CV500 ISP.  So the ISP value is
  * 50 << 4 = 800.  (IMX290/IMX327/IMX307 count in output-depth LSBs instead.)
- * Not yet verified on an IMX662: a capped-lens RAW12 capture averaging ~200
- * confirms it, and 200 is the revert.  It was 200 (50 << 2,
+ * The module vendor's IMX662 driver in OpenIPC/openhisilicon (#296) ships
+ * 0x320 (800) too.  Not yet verified on an IMX662: a capped-lens RAW12 capture
+ * averaging ~200 confirms it, and 200 is the revert.  It was 200 (50 << 2,
  * as if BLKLEVEL were a 12-bit pedestal), which left ~600 codes unsubtracted;
  * the WB gains multiply that residue by 1.13x on R and 2.9x on B, lifting
  * blue hardest.  The correction comes from the review of
