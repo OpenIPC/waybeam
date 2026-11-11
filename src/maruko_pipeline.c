@@ -3955,8 +3955,8 @@ static void maruko_report_frame_gate_setup(FrameGateSetupStatus st,
 {
 	switch (st) {
 	case FRAME_GATE_SETUP_NO_RING:
-		fprintf(stderr, "WARNING: [maruko] video0.frameGate=on needs a "
-			"frame-shm:// transport; gate inert\n");
+		fprintf(stderr, "NOTE: [maruko] frame gate inert — this output "
+			"is not frame-shm, so it has no occupancy signal\n");
 		return;
 	case FRAME_GATE_SETUP_CLOSE_TOO_HIGH:
 		fprintf(stderr, "WARNING: [maruko] frameGateCloseSlots %u exceeds "

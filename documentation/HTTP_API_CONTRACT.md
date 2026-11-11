@@ -108,7 +108,7 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.85.7",
+    "app_version": "0.85.8",
     "contract_version": "0.32.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
@@ -134,7 +134,7 @@ Response `200`:
       "sensor": { "index": -1, "mode": -1 },
       "isp": { "sensorBin": "/etc/sensors/imx415_greg_fpvXVIII-gpt200.bin", "aeEngine": "sdk", "aeFps": 15, "gainMax": 0, "awbMode": "auto", "awbCt": 5500, "keepAspect": true },
       "image": { "mirror": false, "flip": false, "rotate": 0 },
-      "video0": { "rcMode": "cbr", "fps": 90, "size": "auto", "bitrate": 8192, "gopSize": 1.0, "qpDelta": 0, "sceneThreshold": 0, "sceneHoldoff": 2, "sliceCount": 1, "resilience": "off", "intraRefreshQp": 0, "zoomX": 0.5, "zoomY": 0.5, "framing": "off", "frameGateCloseSlots": 3, "frameGateMaxClosedMs": 500 },
+      "video0": { "rcMode": "cbr", "fps": 90, "size": "auto", "bitrate": 8192, "gopSize": 1.0, "qpDelta": 0, "sceneThreshold": 0, "sceneHoldoff": 2, "sliceCount": 1, "resilience": "off", "intraRefreshQp": 0, "zoomX": 0.5, "zoomY": 0.5, "framing": "off", "frameGateCloseSlots": 0, "frameGateMaxClosedMs": 0 },
       "outgoing": { "enabled": true, "server": "udp://192.168.2.20:5600", "streamMode": "rtp", "maxPayloadSize": 1400, "connectedUdp": false, "allowUnixEncoderStall": false },
       "fpv": { "roiEnabled": false, "roiQp": -20, "roiSteps": 2, "roiCenter": 0.4, "noiseLevel": 0 },
       "record": { "enabled": false, "mode": "off", "dir": "/tmp/sdcard", "format": "ts", "maxSeconds": 300, "maxMB": 500 },
@@ -1615,11 +1615,7 @@ Response `200` (UDP/Unix kernel-buffer fill_pct):
     "pressureDrops": 0,
     "transportDrops": 0,
     "packetsSent": 184523,
-    "badAuDrops": 0,
-    "gateClosed": false,
-    "gateCloseEvents": 0,
-    "gateEscapeEvents": 0,
-    "gateClosedMs": 0
+    "badAuDrops": 0
   }
 }
 ```
