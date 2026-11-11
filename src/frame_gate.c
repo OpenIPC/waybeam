@@ -73,18 +73,6 @@ void frame_gate_force_open(FrameGate *g, uint64_t now_us)
 	__atomic_store_n(&g->open, 1, __ATOMIC_RELEASE);
 }
 
-void frame_gate_restore_closed(FrameGate *g, uint64_t now_us)
-{
-	if (!g || !g->open)
-		return;
-	__atomic_store_n(&g->closed_since_us, now_us, __ATOMIC_RELAXED);
-	__atomic_store_n(&g->open, 0, __ATOMIC_RELEASE);
-	/* The gate is closed again, so any escape pulse is over.  Leaving it
-	 * armed would let a stale pulse suppress the next legitimate close
-	 * after a NORMAL reopen. */
-	g->escape_open_us = 0;
-}
-
 FrameGateAction frame_gate_observe(FrameGate *g, uint32_t used_slots,
 	uint64_t now_us)
 {
