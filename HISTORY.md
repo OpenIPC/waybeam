@@ -106,6 +106,9 @@ contract change — `contract_version` stays **0.32.0**.
   shows the four `gate*` fields (they are frame-shm only, as the field table
   says), and the `/api/v1/config` example shows the configured `0` defaults
   rather than the effective 3 / 500.
+- Removed `documentation/ADAPTIVE_FRAME_GATE_HANDOFF.md`: a bench-session
+  handoff, not maintained reference. The gate's behaviour is documented in
+  `include/frame_gate.h`, `HTTP_API_CONTRACT.md` and the earlier 0.85.x entries.
 
 ## [0.85.6] - 2026-09-14
 
