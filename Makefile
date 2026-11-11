@@ -516,9 +516,10 @@ TEST_RUNNER_WERROR := tests/test_runner.werror
 TEST_RUNNER_ASAN   := tests/test_runner.asan
 TEST_RUNNER_TSAN   := tests/test_runner.tsan
 
-test-werror:
+test-werror: $(CV610_VALIDATION_TEST)
 	$(HOST_CC) $(HOST_CFLAGS) -Werror $(TEST_SRCS) $(TEST_LIB_SRCS) -lpthread -ldl -lm -o $(TEST_RUNNER_WERROR)
 	./$(TEST_RUNNER_WERROR)
+	./$(CV610_VALIDATION_TEST)
 
 test-asan:
 	$(HOST_CC) $(HOST_CFLAGS) -Werror -fsanitize=address,undefined $(TEST_SRCS) $(TEST_LIB_SRCS) -lpthread -ldl -lm -o $(TEST_RUNNER_ASAN)
