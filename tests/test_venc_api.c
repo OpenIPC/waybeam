@@ -2225,9 +2225,9 @@ static int test_frame_gate_loaded_config_bounds(void)
 	 * frame_gate_resolve() could wrap to an escape shorter than the
 	 * debounce.  Drive the same gate the loader runs. */
 	static const uint32_t close_ok[] = { 0, 1, 64 };
-	static const uint32_t close_bad[] = { 65, 1000 };
+	static const uint32_t close_bad[] = { 65, 1000, 0xFFFFFFFFu };
 	static const uint32_t max_ok[] = { 0, 1, 60000 };
-	static const uint32_t max_bad[] = { 60001, 4294968u };
+	static const uint32_t max_bad[] = { 60001, 4294968u, 0xFFFFFFFFu };
 	size_t i;
 
 	for (i = 0; i < sizeof(close_ok) / sizeof(close_ok[0]); i++) {

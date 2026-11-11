@@ -29,7 +29,7 @@ stock OpenIPC images install at `/usr/lib/sensors/libsns_imx662.so`. This one
 stays the source of truth for waybeam: that copy refuses 100 fps because stock
 sys_config feeds the IMX662 37.125 MHz, while here the daemon selects the
 27 MHz clock for that mode. Fixes found on either side are ported across; the
-0.85.7 entry in `HISTORY.md` lists the last round.
+0.85.8 entry in `HISTORY.md` lists the last round.
 
 ## What the plugin programs
 

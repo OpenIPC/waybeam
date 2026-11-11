@@ -181,8 +181,9 @@ void venc_config_defaults(VencConfig *cfg)
 	/* H.265 multi-slice split (video0, all encoder backends) — 1 = off */
 	cfg->video0.slice_count = 1;
 
-	/* Adaptive frame gate (video0) — off by default; 0 selects the
-	 * frame_gate.h defaults for both knobs. */
+	/* Adaptive frame gate (video0) thresholds.  The gate has no switch:
+	 * it arms on every frame-shm output.  0 selects the frame_gate.h
+	 * defaults for both knobs. */
 	cfg->video0.frame_gate_close_slots = 0;
 	cfg->video0.frame_gate_max_closed_ms = 0;
 
@@ -671,17 +672,14 @@ static void load_video0(const cJSON *root, VencConfigVideo *v)
 	/* Adaptive frame gate thresholds.  The gate itself has no switch — it
 	 * arms on any frame-shm transport; these only tune it. */
 	{
-		/* Clamp in signed space so a negative cannot wrap to a huge
-		 * unsigned; 0 means "use the frame_gate.h default". */
-		int cs = json_get_int(obj, "frameGateCloseSlots",
-			(int)v->frame_gate_close_slots);
-		if (cs < 0) cs = 0;
-		v->frame_gate_close_slots = (uint32_t)cs;
-
-		int mc = json_get_int(obj, "frameGateMaxClosedMs",
-			(int)v->frame_gate_max_closed_ms);
-		if (mc < 0) mc = 0;
-		v->frame_gate_max_closed_ms = (uint32_t)mc;
+		/* No clamp: a negative wraps to a huge uint32 that
+		 * venc_api_validate_loaded_config() rejects with the field's
+		 * range error.  Clamping it to 0 here quietly turned an operator
+		 * typo into "use the frame_gate.h default". */
+		v->frame_gate_close_slots = (uint32_t)json_get_int(obj,
+			"frameGateCloseSlots", (int)v->frame_gate_close_slots);
+		v->frame_gate_max_closed_ms = (uint32_t)json_get_int(obj,
+			"frameGateMaxClosedMs", (int)v->frame_gate_max_closed_ms);
 	}
 
 	/* Resilience preset is the sole driver of intra-refresh + SVC-T
