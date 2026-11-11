@@ -64,17 +64,21 @@ void frame_gate_force_open(FrameGate *g, uint64_t now_us)
 	if (!g || g->open)
 		return;
 	if (now_us > g->closed_since_us)
-		g->closed_total_us += now_us - g->closed_since_us;
-	g->open = 1;
-	g->closed_since_us = 0;
+		__atomic_store_n(&g->closed_total_us,
+			g->closed_total_us + (now_us - g->closed_since_us),
+			__ATOMIC_RELAXED);
+	/* closed_since_us is left as it was: frame_gate_status_json() may be
+	 * reading it on the HTTP thread, and zeroing it there would turn
+	 * now - since into a whole epoch of bogus gateClosedMs. */
+	__atomic_store_n(&g->open, 1, __ATOMIC_RELEASE);
 }
 
 void frame_gate_restore_closed(FrameGate *g, uint64_t now_us)
 {
 	if (!g || !g->open)
 		return;
-	g->open = 0;
-	g->closed_since_us = now_us;
+	__atomic_store_n(&g->closed_since_us, now_us, __ATOMIC_RELAXED);
+	__atomic_store_n(&g->open, 0, __ATOMIC_RELEASE);
 	/* The gate is closed again, so any escape pulse is over.  Leaving it
 	 * armed would let a stale pulse suppress the next legitimate close
 	 * after a NORMAL reopen. */
@@ -122,9 +126,10 @@ FrameGateAction frame_gate_observe(FrameGate *g, uint32_t used_slots,
 				return FRAME_GATE_ACTION_NONE;
 		}
 		g->escape_open_us = 0;
-		g->open = 0;
-		g->closed_since_us = now_us;
-		g->close_events++;
+		__atomic_store_n(&g->closed_since_us, now_us, __ATOMIC_RELAXED);
+		__atomic_store_n(&g->open, 0, __ATOMIC_RELEASE);
+		__atomic_store_n(&g->close_events, g->close_events + 1,
+			__ATOMIC_RELAXED);
 		return FRAME_GATE_ACTION_CLOSE;
 	}
 
@@ -154,7 +159,8 @@ FrameGateAction frame_gate_observe(FrameGate *g, uint32_t used_slots,
 	 * overflow and report full_drops instead, which is a diagnosable
 	 * failure rather than a silent one. */
 	if (elapsed_us >= g->cfg.max_closed_us) {
-		g->escape_events++;
+		__atomic_store_n(&g->escape_events, g->escape_events + 1,
+			__ATOMIC_RELAXED);
 		frame_gate_force_open(g, now_us);
 		/* Hold open until one frame lands, or the escape re-closes
 		 * before the ring can report anything.  Remember the occupancy
@@ -172,6 +178,7 @@ int frame_gate_status_json(const FrameGate *g, uint64_t now_us,
 	char *out, size_t cap)
 {
 	uint64_t closed_us;
+	int open;
 
 	if (!out || cap == 0)
 		return 0;
@@ -183,9 +190,21 @@ int frame_gate_status_json(const FrameGate *g, uint64_t now_us,
 	 * would under-report by the whole current interval — and a caller polls
 	 * this precisely while congested, which is exactly when it is closed.
 	 * Fold the in-progress interval in. */
-	closed_us = g->closed_total_us;
-	if (!g->open && now_us > g->closed_since_us)
-		closed_us += now_us - g->closed_since_us;
+	/* The stream loop writes these while the HTTP thread reads them, so
+	 * every field is an atomic load (a plain 64-bit read tears on 32-bit
+	 * ARM).  `open` is read once and first: since is stored before a
+	 * close publishes it, so a reader that sees closed sees that close's
+	 * start.  A reopen racing the read can briefly count the last
+	 * interval twice; it is never left unbounded. */
+	open = __atomic_load_n(&g->open, __ATOMIC_ACQUIRE);
+	closed_us = __atomic_load_n(&g->closed_total_us, __ATOMIC_RELAXED);
+	if (!open) {
+		uint64_t since = __atomic_load_n(&g->closed_since_us,
+			__ATOMIC_RELAXED);
+
+		if (now_us > since)
+			closed_us += now_us - since;
+	}
 
 	/* Return snprintf's would-be length rather than discarding it: that is
 	 * the only value that tracks the format string automatically, so a test
@@ -195,7 +214,8 @@ int frame_gate_status_json(const FrameGate *g, uint64_t now_us,
 	return snprintf(out, cap,
 		",\"gateClosed\":%s,\"gateCloseEvents\":%u,"
 		"\"gateEscapeEvents\":%u,\"gateClosedMs\":%llu",
-		g->open ? "false" : "true",
-		(unsigned)g->close_events, (unsigned)g->escape_events,
+		open ? "false" : "true",
+		(unsigned)__atomic_load_n(&g->close_events, __ATOMIC_RELAXED),
+		(unsigned)__atomic_load_n(&g->escape_events, __ATOMIC_RELAXED),
 		(unsigned long long)(closed_us / 1000u));
 }

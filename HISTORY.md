@@ -1,5 +1,32 @@
 # History
 
+## [0.85.7] - 2026-11-11
+
+Fixes the six findings of the upstream Qodo review of the 0.85.6 sync. No
+contract change — `contract_version` stays **0.32.0**.
+
+- **CV610 spun on the CPU while gated.** The closed gate leaves the encoded
+  frame in VENC's output FIFO, so `venc_fd` stayed readable and `select()`
+  returned at once instead of waiting its 2 ms — a busy loop for the whole
+  closed interval, taking CPU from the very consumer whose slowness closed the
+  gate. While gated the loop now waits on the timeout alone, matching Star6E
+  and Maruko.
+- **Gate status could report a bogus `gateClosedMs`.** The HTTP thread read
+  the gate's state, timestamps and counters while the stream loop wrote them.
+  Besides tearing 64-bit values on 32-bit ARM, a reopen zeroed
+  `closed_since_us`, so a status read that overlapped it could report the whole
+  clock epoch as closed time. The fields are now written and read with atomics,
+  and the reopen leaves `closed_since_us` alone (it is only meaningful while
+  closed).
+- **`make test-werror` stopped running the CV610 validation suite** when 0.85.6
+  gave it its own binary. It runs again.
+- **Maruko logged a WARNING naming the removed `video0.frameGate` key** on every
+  non-frame-shm start. It now prints the same NOTE as Star6E and CV610.
+- **`frame_shm_rate_consumer` busy-spun on an empty ring**, distorting the very
+  measurements it exists for on a single-core SoC. It backs off 1 ms instead.
+- The config-defaults comment no longer says the gate is "off by default"; it
+  has no switch and arms on every frame-shm output.
+
 ## [0.85.6] - 2026-09-14
 
 Follow-ups to the two-week adversarial review: four behavioural fixes its

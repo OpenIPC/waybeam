@@ -181,8 +181,9 @@ void venc_config_defaults(VencConfig *cfg)
 	/* H.265 multi-slice split (video0, all encoder backends) — 1 = off */
 	cfg->video0.slice_count = 1;
 
-	/* Adaptive frame gate (video0) — off by default; 0 selects the
-	 * frame_gate.h defaults for both knobs. */
+	/* Adaptive frame gate (video0) thresholds.  The gate has no switch:
+	 * it arms on every frame-shm output.  0 selects the frame_gate.h
+	 * defaults for both knobs. */
 	cfg->video0.frame_gate_close_slots = 0;
 	cfg->video0.frame_gate_max_closed_ms = 0;
 

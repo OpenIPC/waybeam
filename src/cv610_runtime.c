@@ -2603,9 +2603,16 @@ static int cv610_run(void *opaque)
 			}
 		}
 
+		/* Gated, the frame stays in VENC's output FIFO, so venc_fd
+		 * stays readable: selecting on it would return at once and
+		 * spin until the gate reopens.  Wait out the timeout alone. */
 		FD_ZERO(&readfds);
-		FD_SET(venc_fd, &readfds);
-		ready = select(venc_fd + 1, &readfds, NULL, NULL, &timeout);
+		if (frame_gate_is_open(&ctx->frame_gate)) {
+			FD_SET(venc_fd, &readfds);
+			ready = select(venc_fd + 1, &readfds, NULL, NULL, &timeout);
+		} else {
+			ready = select(0, NULL, NULL, NULL, &timeout);
+		}
 		select_errno = errno;
 		/* Service the sidecar here, ahead of every `continue` below:
 		 * subscription and clock-sync traffic has to be answered while
@@ -2618,10 +2625,9 @@ static int cv610_run(void *opaque)
 		 * recvfrom and would otherwise clobber select's EINTR. */
 		if (ctx->sidecar.fd > 0)
 			rtp_sidecar_poll(&ctx->sidecar);
-		/* Reopen path.  While the gate is closed no frame ever
-		 * arrives, so select() always times out and the per-frame
-		 * call below never runs — this is the only thing that can
-		 * let go again. */
+		/* Reopen path.  While the gate is closed select() waits on
+		 * the timeout alone and the per-frame call below never runs —
+		 * this is the only thing that can let go again. */
 		cv610_service_frame_gate(ctx);
 		/* Gated: leave the encoded frame in VENC's output FIFO rather
 		 * than draining it.  The gate is serviced above, off the ring's
