@@ -2,7 +2,7 @@
 
 ## [0.85.7] - 2026-11-11
 
-Fixes the six findings of the upstream Qodo review of the 0.85.6 sync. No
+Fixes the findings of the upstream Qodo reviews of the 0.85.6 sync. No
 contract change — `contract_version` stays **0.32.0**.
 
 - **CV610 spun on the CPU while gated.** The closed gate leaves the encoded
@@ -26,6 +26,14 @@ contract change — `contract_version` stays **0.32.0**.
   measurements it exists for on a single-core SoC. It backs off 1 ms instead.
 - The config-defaults comment no longer says the gate is "off by default"; it
   has no switch and arms on every frame-shm output.
+- **A negative frame-gate value in a config file was accepted as the
+  default.** `load_video0()` clamped it to 0 ("use the frame_gate.h default")
+  before validation could see it. It now reaches validation, and the load
+  fails with the field's range error. Covered by `test_venc_config`.
+- `HTTP_API_CONTRACT.md`: the UDP/Unix `transport/status` example no longer
+  shows the four `gate*` fields (they are frame-shm only, as the field table
+  says), and the `/api/v1/config` example shows the configured `0` defaults
+  rather than the effective 3 / 500.
 
 ## [0.85.6] - 2026-09-14
 

@@ -95,6 +95,32 @@ static int test_defaults(void)
 
 /* Resilience preset is the sole driver of intra-refresh, SVC-T, and
  * (for named presets) gop_size.  "off" preserves the user's gopSize. */
+/* A negative frame-gate value in a config FILE must be rejected with a range
+ * error, not clamped to 0 (= "use the default"), or an operator typo is
+ * accepted silently. */
+static int test_frame_gate_negative_not_clamped(void)
+{
+	int failures = 0;
+	VencConfig cfg;
+	char path[] = "/tmp/venc_frame_gate_test_XXXXXX";
+	int fd = mkstemp(path);
+	FILE *f;
+
+	CHECK("frame_gate_mkstemp_ok", fd >= 0);
+	if (fd < 0)
+		return failures;
+	f = fdopen(fd, "w");
+	if (!f) { close(fd); unlink(path); return failures + 1; }
+	fputs("{\"video0\":{\"frameGateCloseSlots\":-1,"
+		"\"frameGateMaxClosedMs\":-1}}", f);
+	fclose(f);
+
+	venc_config_defaults(&cfg);
+	CHECK("frame_gate_negative_rejected", venc_config_load(path, &cfg) != 0);
+	unlink(path);
+	return failures;
+}
+
 static int test_resilience_preset_expansion(void)
 {
 	int failures = 0;
@@ -1494,6 +1520,7 @@ int test_venc_config(void)
 	failures += test_save_layout_byte_equal();
 	failures += test_save_layout_populated_round_trip();
 	failures += test_resilience_preset_expansion();
+	failures += test_frame_gate_negative_not_clamped();
 	failures += test_detect_export_roundtrip();
 	return failures;
 }
