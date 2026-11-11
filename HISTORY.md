@@ -1,6 +1,6 @@
 # History
 
-## [0.86.0] - 2026-11-10
+## [0.86.0] - 2026-11-11
 
 **CV610 drives a Sony IMX335 as well as the IMX662**, chosen from the u-boot
 `sensor` name. No config field, no API change: `contract_version` is

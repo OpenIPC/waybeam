@@ -2275,15 +2275,16 @@ static int cv610_prepare(void *opaque)
 {
 	Cv610RunnerContext *ctx = opaque;
 	VencConfig *cfg = &ctx->config;
-	const Cv610Sensor *sensor = cv610_sensor_current();
 	const char *hint = getenv("SENSOR");
+	const Cv610Sensor *found = cv610_sensor_find(hint);
+	const Cv610Sensor *sensor = found ? found : cv610_sensor_current();
 	const Cv610SensorMode *mode;
 	int mode_index = -1;
 
 	setvbuf(stdout, NULL, _IONBF, 0);
 	/* The only record of which part this run drives, and of why when the
 	 * system named none this backend has a plugin for. */
-	if (cv610_sensor_find(hint) == NULL)
+	if (found == NULL)
 		fprintf(stderr, "WARNING: SENSOR=\"%s\" is not a CV610 sensor waybeam "
 			"drives; assuming %s\n", hint ? hint : "", sensor->name);
 	printf("> CV610 sensor: %s (%s)\n", sensor->name, sensor->plugin_path);
