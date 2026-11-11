@@ -132,7 +132,12 @@ int main(int argc, char **argv)
 			sec_frames++;
 			t_next += period_us;
 		} else {
-			/* Nothing queued: the producer is behind, not us. */
+			/* Nothing queued: the producer is behind, not us.  The
+			 * read does not block, so back off 1 ms rather than spin
+			 * on a single-core SoC and steal CPU from the producer. */
+			struct timespec idle = { 0, 1000000L };
+
+			nanosleep(&idle, NULL);
 			t_next = now_us();
 		}
 
