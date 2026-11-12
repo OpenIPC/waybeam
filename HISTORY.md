@@ -16,8 +16,9 @@ instead of naming one from the bootloader's side.
   `/sys/module/hisi_mem/parameters/{allocator,mmz}` when the kernel publishes
   them, the same source OpenIPC's own `load_hisilicon` uses, and keeps `ot`
   (or `cma`, for a `mmz=` carve-out) on a boot without `hisi_mem`.
-  `CV610_MMZ_START`/`CV610_MMZ_SIZE` apply only in that second case, and the
-  loader says so when the kernel overrides them.
+  `CV610_MMZ_START`/`CV610_MMZ_SIZE` apply only in that second case, and
+  only when the command line does not name the carve-out with `mmz=`; the
+  loader says which of the two overrode them.
 - **Measured, not estimated: the 2592-wide IMX335 rows take 94 MiB of MMZ**
   at 1080p output, against 44 MiB for 1080p and 34 MiB for the binned row.
   The docs and the platform conf no longer suggest moving the split through

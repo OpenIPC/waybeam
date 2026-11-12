@@ -23,24 +23,35 @@ ARTIFACT_DIR=${ARTIFACT_DIR:-/usr/lib/cv610}
 HISI_MEM_PARAMS=${HISI_MEM_PARAMS:-/sys/module/hisi_mem/parameters}
 MMZ_ALLOCATOR=ot
 MMZ_ZONE=anonymous,0,${CV610_MMZ_START:-0x44000000},${CV610_MMZ_SIZE:-64M}
+
+# The platform conf offers START/SIZE as the way to move the zone, so when
+# something else owns it -- the kernel's own layout, or a mmz= carve-out named
+# on the command line -- say so instead of swallowing what an operator set.
+note_mmz_ignored()
+{
+	echo "note: $1; CV610_MMZ_START/SIZE ignored, open_mmz gets $MMZ_ZONE" >&2
+}
+
 if [ -r "$HISI_MEM_PARAMS/allocator" ]; then
 	MMZ_ALLOCATOR=$(cat "$HISI_MEM_PARAMS/allocator")
 	MMZ_ZONE=$(cat "$HISI_MEM_PARAMS/mmz")
-	# The platform conf offers START/SIZE as the way to move the zone, and on
-	# this boot nothing can move it: the kernel has reserved the range already
-	# and its own parameters are read-only. Say so rather than ignore it.
+	# The kernel has reserved the range already and its own parameters are
+	# read-only, so nothing here can move it.
 	if [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
-		echo "note: the kernel laid memory out itself;" >&2
-		echo "      CV610_MMZ_START/SIZE ignored, open_mmz gets $MMZ_ZONE" >&2
+		note_mmz_ignored "the kernel laid memory out itself"
 	fi
 else
 	# No hisi_mem: the zone is a bootloader carve-out, named either by the
 	# platform conf or by mmz= on the command line -- the same range, seen
-	# from the kernel's side. CMA provides that one, not MMZ's allocator.
+	# from the kernel's side. CMA provides that one, not MMZ's allocator,
+	# and the command line is the later of the two words on the same boot.
 	cmdmz=$(awk -F= '$1 == "mmz" {print $2}' RS=' ' /proc/cmdline)
 	if [ -n "${cmdmz:-}" ]; then
 		MMZ_ALLOCATOR=cma
 		MMZ_ZONE=$cmdmz
+		if [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
+			note_mmz_ignored "the command line names the carve-out"
+		fi
 	fi
 fi
 # Clock profile for the initial insmod; the daemon retunes it per mode.

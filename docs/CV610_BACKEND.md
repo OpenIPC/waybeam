@@ -226,7 +226,9 @@ needs from the craft:
   therefore reads `/sys/module/hisi_mem/parameters/{allocator,mmz}` -- the
   same source OpenIPC's own `load_hisilicon` uses -- and
   `CV610_MMZ_START`/`CV610_MMZ_SIZE` apply only on a boot without `hisi_mem`,
-  where the zone is a bootloader carve-out. `mmz_allocator=ot` there is what
+  where the zone is a bootloader carve-out, and only when the command line
+  does not name that carve-out itself with `mmz=`; either way the loader says
+  which values it dropped. `mmz_allocator=ot` is what
   the bootloader layout needs; against `hisi_mem` it is fatal, because the
   zone then lies inside kernel memory and `open_mmz` refuses the zone
   ("MMZ conflict to kernel memory") and loads no MPP modules at all.
