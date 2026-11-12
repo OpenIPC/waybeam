@@ -5,8 +5,9 @@ backend. It was developed and verified on the SIP-K662C6S board with four
 MIPI lanes.
 
 Verified full-frame modes are 1920x1080 at 30 and 60 fps in RAW12, and 90
-and 100 fps in RAW10. The 100 fps mode requires the board loader's 27 MHz
-sensor-clock profile; the other modes use the IMX662 37.125 MHz profile.
+and 100 fps in RAW10. The 100 fps mode runs on a 27 MHz sensor clock and the
+others on 37.125 MHz; the daemon sets it per mode through the sys_config's
+`sns0_clk_hz` (`drivers/cv610/`).
 
 Build it with the same public OpenHisilicon headers and OpenIPC ARMv7 musl
 toolchain as the daemon:
