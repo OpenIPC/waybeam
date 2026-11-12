@@ -10,6 +10,8 @@
     "bitrate": 2600,
     "gopSize": 1.0,
     "sliceCount": 1,
+    "frameGateCloseSlots": 0,
+    "frameGateMaxClosedMs": 0,
     "resilience": "off",
     "intraRefreshQp": 0,
     "framing": "off"

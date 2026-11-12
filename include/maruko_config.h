@@ -70,6 +70,11 @@ typedef struct {
 	uint8_t ref_pred;
 	/* Requested whole-access-unit H.265 slice count. 1 disables splitting. */
 	uint32_t slice_count;
+	/* Adaptive frame gate — mirrors video0.frame_gate* so the Maruko
+	 * pipeline, which sees MarukoBackendConfig rather than VencConfig,
+	 * can resolve the gate at bring-up.  See include/frame_gate.h. */
+	uint32_t frame_gate_close_slots;
+	uint32_t frame_gate_max_closed_ms;
 	/* Resilience preset name — mirror of video0.resilience.  Used by
 	 * the debug OSD; pipeline behaviour is fully determined by the
 	 * already-expanded intra_refresh_* / ref_* fields above. */

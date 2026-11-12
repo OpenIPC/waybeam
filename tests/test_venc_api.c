@@ -521,6 +521,27 @@ static int test_field_support_by_backend(void)
 	CHECK("slice count supported cv610",
 		venc_api_field_supported_for_backend("cv610",
 			"video0.sliceCount") == 1);
+	/* The adaptive frame gate is wired on CV610: cv610_runtime.c passes
+	 * both tunables to frame_gate_setup().  Greyed controls here while a
+	 * hand-edited config was honoured is the parity gap this guards. */
+	CHECK("frame gate close slots supported cv610",
+		venc_api_field_supported_for_backend("cv610",
+			"video0.frame_gate_close_slots") == 1);
+	CHECK("frame gate max closed supported cv610",
+		venc_api_field_supported_for_backend("cv610",
+			"video0.frame_gate_max_closed_ms") == 1);
+	CHECK("frame gate close slots alias supported cv610",
+		venc_api_field_supported_for_backend("cv610",
+			"video0.frameGateCloseSlots") == 1);
+	CHECK("frame gate max closed alias supported cv610",
+		venc_api_field_supported_for_backend("cv610",
+			"video0.frameGateMaxClosedMs") == 1);
+	CHECK("frame gate close slots supported star6e",
+		venc_api_field_supported_for_backend("star6e",
+			"video0.frame_gate_close_slots") == 1);
+	CHECK("frame gate max closed supported maruko",
+		venc_api_field_supported_for_backend("maruko",
+			"video0.frame_gate_max_closed_ms") == 1);
 	CHECK("opus config API unsupported cv610",
 		venc_api_field_supported_for_backend("cv610",
 			"audio.codec") == 0);
@@ -2192,6 +2213,50 @@ static int test_roi_qp_range_is_pm20(void)
 	return failures;
 }
 
+static int test_frame_gate_loaded_config_bounds(void)
+{
+	int failures = 0;
+	VencConfig cfg;
+
+	/* The two frame-gate tunables were validated only on the live API
+	 * path: validate_field_cfg() carries the 0-64 / 0-60000 rules, but
+	 * they were missing from keys[] here, so a config FILE carrying
+	 * frameGateMaxClosedMs skipped them and the uint32 *1000 in
+	 * frame_gate_resolve() could wrap to an escape shorter than the
+	 * debounce.  Drive the same gate the loader runs. */
+	static const uint32_t close_ok[] = { 0, 1, 64 };
+	static const uint32_t close_bad[] = { 65, 1000, 0xFFFFFFFFu };
+	static const uint32_t max_ok[] = { 0, 1, 60000 };
+	static const uint32_t max_bad[] = { 60001, 4294968u, 0xFFFFFFFFu };
+	size_t i;
+
+	for (i = 0; i < sizeof(close_ok) / sizeof(close_ok[0]); i++) {
+		venc_config_defaults(&cfg);
+		cfg.video0.frame_gate_close_slots = close_ok[i];
+		CHECK("frameGateCloseSlots loaded config accepted",
+			venc_api_validate_loaded_config(&cfg) == NULL);
+	}
+	for (i = 0; i < sizeof(close_bad) / sizeof(close_bad[0]); i++) {
+		venc_config_defaults(&cfg);
+		cfg.video0.frame_gate_close_slots = close_bad[i];
+		CHECK("frameGateCloseSlots loaded config rejected",
+			venc_api_validate_loaded_config(&cfg) != NULL);
+	}
+	for (i = 0; i < sizeof(max_ok) / sizeof(max_ok[0]); i++) {
+		venc_config_defaults(&cfg);
+		cfg.video0.frame_gate_max_closed_ms = max_ok[i];
+		CHECK("frameGateMaxClosedMs loaded config accepted",
+			venc_api_validate_loaded_config(&cfg) == NULL);
+	}
+	for (i = 0; i < sizeof(max_bad) / sizeof(max_bad[0]); i++) {
+		venc_config_defaults(&cfg);
+		cfg.video0.frame_gate_max_closed_ms = max_bad[i];
+		CHECK("frameGateMaxClosedMs loaded config rejected",
+			venc_api_validate_loaded_config(&cfg) != NULL);
+	}
+	return failures;
+}
+
 static int test_resilience_preset_preserves_intra_refresh_qp(void)
 {
 	int failures = 0;
@@ -2745,6 +2810,7 @@ int test_venc_api(void)
 	failures += test_multi_set_url_decodes_values();
 	failures += test_set_rejects_malformed_percent_escape();
 	failures += test_roi_qp_range_is_pm20();
+	failures += test_frame_gate_loaded_config_bounds();
 	failures += test_resilience_preset_preserves_intra_refresh_qp();
 	failures += test_capabilities_emits_ui();
 	failures += test_capabilities_awb_fps_backend_gate();

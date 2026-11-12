@@ -457,8 +457,22 @@ static const FieldUi ui_pause_stab = {
 	"framing=off or zoom."
 };
 
-/* UI descriptors for the RC QP bounds.  Rendered purely from capabilities —
- * these were API-only (no static SECTIONS rows). */
+/* UI descriptors for the adaptive frame gate thresholds.  Rendered purely
+ * from capabilities — these are API-only (no static SECTIONS rows). */
+static const FieldUi ui_frame_gate_close_slots = {
+	"Video", "Frame gate close slots", "number", 0, 64, 1, NULL,
+	"Egress ring occupancy, in slots, at which the gate closes. 0 = "
+	"default 3. The ring's healthy idle occupancy is one frame, so 2 is "
+	"standing backlog and 3 leaves one slot of burst tolerance. Reopen is "
+	"pinned at <= 1. Requires restart."
+};
+static const FieldUi ui_frame_gate_max_closed_ms = {
+	"Video", "Frame gate max closed ms", "number", 0, 60000, 10, NULL,
+	"Safety escape: reopen unconditionally after this long closed, so a "
+	"dead consumer cannot stop the stream for good — the ring then "
+	"overflows and reports full_drops, which is diagnosable. 0 = default "
+	"500. Requires restart."
+};
 static const FieldUi ui_min_qp = {
 	"Video", "Min QP", "number", 0, 51, 1, NULL,
 	"RC QP floor. 0 = leave the SDK default. Raising the floor caps quality and saves bitrate; LOWERING it lets CBR actually spend its budget on a simple scene instead of undershooting the target. Applied live."
@@ -630,6 +644,13 @@ static const FieldDesc g_fields[] = {
 	FIELD(video0, scene_threshold,  FT_UINT16, MUT_RESTART),
 	FIELD(video0, scene_holdoff,   FT_UINT8,  MUT_RESTART),
 	FIELD_UI(video0, slice_count,  FT_UINT,   MUT_RESTART, &ui_slice_count),
+	/* Frame gate: restart-required like resilience/sliceCount.  It is a
+	 * set-once tuning knob, not something swept in flight, so it does not
+	 * earn a live-apply group. */
+	FIELD_UI(video0, frame_gate_close_slots, FT_UINT, MUT_RESTART,
+		&ui_frame_gate_close_slots),
+	FIELD_UI(video0, frame_gate_max_closed_ms, FT_UINT, MUT_RESTART,
+		&ui_frame_gate_max_closed_ms),
 	FIELD(video0, resilience,           FT_STRING, MUT_RESTART),
 	FIELD_UI(video0, intra_refresh_qp, FT_UINT8, MUT_RESTART, &ui_intra_refresh_qp),
 	/* zoom_x/y stay live for smooth panning via MI_VPE_SetPortCrop; the zoom
@@ -758,6 +779,8 @@ static const FieldAlias g_field_aliases[] = {
 	{ "video0.sceneThreshold", "video0.scene_threshold" },
 	{ "video0.sceneHoldoff", "video0.scene_holdoff" },
 	{ "video0.sliceCount", "video0.slice_count" },
+	{ "video0.frameGateCloseSlots", "video0.frame_gate_close_slots" },
+	{ "video0.frameGateMaxClosedMs", "video0.frame_gate_max_closed_ms" },
 	{ "video0.intraRefreshQp", "video0.intra_refresh_qp" },
 	{ "video0.zoomX", "video0.zoom_x" },
 	{ "video0.zoomY", "video0.zoom_y" },
@@ -957,6 +980,15 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 			"video0.fps", "video0.size",
 			"video0.bitrate", "video0.gop_size",
 			"video0.slice_count", "video0.resilience",
+			/* Read by cv610_runtime.c's frame_gate_setup() -- the
+			 * gate is armed whenever the output is a frame ring
+			 * (frame-shm://, the CV610 default), so both knobs are
+			 * fields this backend genuinely reads.  The shared table
+			 * already marks them MUT_RESTART, which is what the
+			 * backend wants too: the gate is built once at pipeline
+			 * start and re-read across a respawn. */
+			"video0.frame_gate_close_slots",
+			"video0.frame_gate_max_closed_ms",
 			/* video0.qp_delta is deliberately ABSENT.  CV610's CBR rate
 			 * controller stores gop_attr.normal_p.ip_qp_delta and ignores
 			 * it (measured; README), and the register that does move
@@ -1259,6 +1291,19 @@ static const char *validate_field_cfg(const VencConfig *cfg, const char *key)
 		if (cfg->video0.qp_delta < -12 || cfg->video0.qp_delta > 12)
 			return "qp_delta must be in range [-12, 12]";
 	}
+	if (strcmp(key, "video0.frame_gate_close_slots") == 0) {
+		/* 0 = use the default.  The upper bound is the largest ring we
+		 * would ever build; a value above the live slot_count simply
+		 * never fires, and the runtime warns about that at bring-up. */
+		if (cfg->video0.frame_gate_close_slots > 64)
+			return "video0.frame_gate_close_slots must be 0-64";
+		return NULL;
+	}
+	if (strcmp(key, "video0.frame_gate_max_closed_ms") == 0) {
+		if (cfg->video0.frame_gate_max_closed_ms > 60000)
+			return "video0.frame_gate_max_closed_ms must be 0-60000";
+		return NULL;
+	}
 	if (strcmp(key, "video0.zoom_x") == 0) {
 		double v = cfg->video0.zoom_x;
 		if (!isfinite(v) || v < 0.0 || v > 1.0)
@@ -1509,6 +1554,8 @@ const char *venc_api_validate_loaded_config(const VencConfig *cfg)
 		"video0.size",
 		"video0.scene_holdoff",
 		"video0.slice_count",
+		"video0.frame_gate_close_slots",
+		"video0.frame_gate_max_closed_ms",
 		"video0.zoom_x",
 		"video0.zoom_y",
 		"video0.framing",
@@ -3801,7 +3848,11 @@ static int handle_record_status(int fd, const HttpRequest *req, void *ctx)
 
 #if !HAVE_BACKEND_CV610
 #include "star6e.h"  /* MI_VENC_* */
+#if HAVE_BACKEND_MARUKO
+#include "maruko_controls.h"
+#else
 #include "star6e_controls.h"
+#endif
 #endif
 
 static struct {
