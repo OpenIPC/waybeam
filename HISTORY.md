@@ -1,5 +1,33 @@
 # History
 
+## [0.86.2] - 2026-11-12
+
+The CV610 module loader takes its MMZ zone from the kernel that laid it out,
+instead of naming one from the bootloader's side.
+
+- **Fixed: `load-cv610-online` loaded no modules at all on an OpenIPC CV610
+  image.** It passed `mmz_allocator=ot`, which is right only against a
+  bootloader-driven layout: an OpenIPC hi3516cv6xx kernel measures DRAM and
+  reserves the zone inside kernel memory through CMA, so `open_mmz` refused
+  it (`Conflict MMZ: PHYS(0x42000000, 0x47FFFFFF)` / `MMZ conflict to kernel
+  memory (0x40000000, 0x47FFFFFF)`), `load mmz failed!` ended the sequence,
+  and the craft came up with no MPP modules -- a boot waybeam cannot start
+  on. The loader now reads the allocator and the zone from
+  `/sys/module/hisi_mem/parameters/{allocator,mmz}` when the kernel publishes
+  them, the same source OpenIPC's own `load_hisilicon` uses, and keeps `ot`
+  (or `cma`, for a `mmz=` carve-out) on a boot without `hisi_mem`.
+  `CV610_MMZ_START`/`CV610_MMZ_SIZE` apply only in that second case, and the
+  loader says so when the kernel overrides them.
+- **Measured, not estimated: the 2592-wide IMX335 rows take 94 MiB of MMZ**
+  at 1080p output, against 44 MiB for 1080p and 34 MiB for the binned row.
+  The docs and the platform conf no longer suggest moving the split through
+  the u-boot `mem=`/`osmem`: on a `hisi_mem` kernel those are ignored and the
+  split is a kernel/DT matter.
+- **Hardware:** the loader and `drivers/cv610` were run on a Hi3516CV610 +
+  IMX335 board. All five modes come up, the daemon's `sns0_clk_hz` write takes
+  (`37125000 -> CRG 0x8440 = 0x8010`), and every row delivers its nominal
+  rate at 1080p output: 30.2, 40.2, 60.1, 30.2 and 90.1 fps.
+
 ## [0.86.1] - 2026-11-11
 
 The kernel half of the CV610 sensor chain now lives here too, so 1080p100 is
