@@ -36,7 +36,7 @@ sensor_common.o: $(COMMON)/sensor_common.c
 -include $(DEPS)
 
 $(LIB_NAME).so: $(OBJS)
-	$(CV610_CC) -shared -o $@ $(OBJS)
+	$(CV610_CC) -shared -o $@ $(OBJS) -lm
 
 clean:
 	rm -f $(OBJS) $(DEPS) $(LIB_NAME).so

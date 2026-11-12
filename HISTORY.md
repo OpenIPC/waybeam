@@ -1,5 +1,37 @@
 # History
 
+## [0.85.8] - 2026-11-11
+
+The CV610 IMX662 plugin takes the fixes its OpenHisilicon copy gained in
+review (OpenIPC/openhisilicon#282 vendored it), and keeps what makes this the
+whole-chain copy: **1080p100 stays**, on the 27 MHz clock the daemon selects.
+
+- **The ISP black level is 800, not 200.** The ISP's black level is a fixed
+  14-bit domain and the sensor's BLKLEVEL of 50 counts 10-bit LSBs: FRAMOS's
+  calibration gives it 200/4095 at 12 bits, and IMX335, sharing the `0x032`
+  default, pairs it with `0x320` on this ISP. 200 read it as a 12-bit
+  pedestal and left ~600 codes unsubtracted, which the WB gains lift into
+  blue. Code-level evidence only: **not yet run on an IMX662 board**. A
+  capped-lens raw capture averaging ~200 at RAW12 confirms it, one line
+  reverts it, and a visible shift is expected (deeper blacks, a different
+  AWB and low-light AE settle). The `iq-profiles/cv610-bin/imx662.bin`
+  restore point still carries 200.
+- **A frame-rate change resets the running frame length** (`fl[0]`, AE's
+  `full_lines`). The shutter is computed against `fl[0]`, so a stale one
+  offset exposure once VMAX had moved. Bring-up publishes each mode's own
+  rate, so this matters for a runtime ISP rate change.
+- **A failed bring-up says which step failed.** `imx662_init()` checks the
+  bus open and the register sequence, and a failed AE/AWB callback
+  registration unregisters what did register (and the later unregister no
+  longer overflows summing the errors).
+- The plugin links `-lm` for its gain conversion (no change to the shipped
+  binary on musl, where libm is part of libc).
+- Not taken from upstream: its refusal of 100 fps, which assumes the stock
+  37.125 MHz sys_config clock.
+- The plugin README records that OpenHisilicon has since replaced its copy
+  with the module vendor's driver (#296, 30/60/90 fps), which also uses a
+  black level of 800.
+
 ## [0.85.7] - 2026-11-11
 
 Fixes the findings of the upstream Qodo reviews of the 0.85.6 sync. No

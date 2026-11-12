@@ -24,6 +24,14 @@ interface and `sensor_common.c` from the external OpenHisilicon checkout.
 Linear mode only — `cmos_set_wdr_mode()` rejects every other WDR mode, and HDR
 stays deferred by issue #220.
 
+OpenIPC/openhisilicon vendored a copy of this plugin as `sony_imx662`
+(#282), then replaced it with the sensor module vendor's own driver (#296),
+which offers 30/60/90 fps only; that is what stock OpenIPC images install at
+`/usr/lib/sensors/libsns_imx662.so`. This plugin stays the source of truth for
+waybeam: it adds 100 fps, for which the daemon selects the 27 MHz sensor
+clock. The 0.85.8 entry in `HISTORY.md` lists the last fixes taken from the
+#282 copy's review.
+
 ## What the plugin programs
 
 `imx662_cfg.h` holds Sony's power-on sequence — the reserved analog/ADC trim,

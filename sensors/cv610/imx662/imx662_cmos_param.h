@@ -9,7 +9,7 @@
  * HiSilicon fixed-point conventions used here:
  *   - WB gain:  256 == 1.0x   (matches the vendor sensor drivers' scale)
  *   - CCM coeff: magnitude * 256, bit 15 set for a negative coefficient
- *   - Black level: on the pipeline bit depth (12-bit here)
+ *   - Black level: Format:14.0, a fixed 14-bit ISP domain (IMX662_BLACK_LEVEL)
  */
 
 #ifndef IMX662_CMOS_PARAM_H
@@ -24,18 +24,26 @@
 /* ---- Black level -----------------------------------------------------------
  * ot_isp_cmos_black_level is Format:14.0 (ot_common_isp.h) -- a FIXED 14-bit
  * ISP domain, NOT the sensor's output bit depth.  imx662_sensor_ctl.c writes
- * BLKLEVEL = 50, a 12-bit pedestal, so the ISP value is 50 << 2 = 200 and it
- * is the same number in every mode: every vendor plugin on this silicon uses
- * one constant across all of its modes (sc450ai/sc431hai/sc500ai/sc4336p
- * 0x410, os04d10/gc4023 0x400), sc450ai included, which runs both a 12-bit
- * linear and a 10-bit WDR mode off BLACK_LEVEL_DEFAULT.
+ * BLKLEVEL = 50, which this sensor counts in 10-bit LSBs: FRAMOS's
+ * calibration gives it 200/4095 at 12 bits (the value the first plugin took);
+ * IMX335, sharing the 0x032 default, pairs it with 0x320 on this ISP, and
+ * IMX415 with 200 on the 12-bit-domain CV500 ISP.  So the ISP value is
+ * 50 << 4 = 800.  (IMX290/IMX327/IMX307 count in output-depth LSBs instead.)
+ * The module vendor's IMX662 driver in OpenIPC/openhisilicon (#296) ships
+ * 0x320 (800) too.  Not yet verified on an IMX662: a capped-lens RAW12 capture
+ * averaging ~200 confirms it, and 200 is the revert.  It was 200 (50 << 2,
+ * as if BLKLEVEL were a 12-bit pedestal), which left ~600 codes unsubtracted;
+ * the WB gains multiply that residue by 1.13x on R and 2.9x on B, lifting
+ * blue hardest.  The correction comes from the review of
+ * OpenIPC/openhisilicon#282.
  *
- * Do not rescale this by the mode's bit depth.  It used to be shifted down
- * for the RAW10 modes, which left ~150 codes of pedestal unsubtracted on the
- * 90 and 100 fps modes; the WB gains then multiply that common-mode residue
- * by 1.13x on R and 2.9x on B, lifting blue hardest.
+ * It is the same number in every mode -- 50 at 10 bits is 200 at 12 and 800
+ * at 14 -- as every vendor plugin on this silicon uses one constant across its
+ * modes (sc450ai/sc431hai/sc500ai/sc4336p 0x410, os04d10/gc4023 0x400).  Do
+ * not rescale it by the mode's bit depth: an earlier per-mode shift
+ * subtracted even less on the RAW10 modes.
  */
-#define IMX662_BLACK_LEVEL   200
+#define IMX662_BLACK_LEVEL   800
 
 /* ---- AWB static reference and Planckian curve -----------------------------
  * Recovered verbatim from the factory xipc. The scene routine leaves
@@ -46,7 +54,9 @@
 #define IMX662_AWB_STATIC_WB_R     418
 #define IMX662_AWB_STATIC_WB_GR    256           /* 1.000 * 256 */
 #define IMX662_AWB_STATIC_WB_GB    256           /* 1.000 * 256 */
-/* Measured ~10% too blue at ~2900 K indoor on .181 (2026-08-26).  Lowering
+/* Measured ~10% too blue at ~2900 K indoor on .181 (2026-08-26), with the
+ * black level still at 200; re-measure before reading it as a curve problem,
+ * since the unsubtracted pedestal lifted blue the same way.  Lowering
  * this to 492 recovers about half of that and is the right domain for the
  * correction, but the transfer saturates, the magnitude was never resolved
  * above the bench's own repeatability, and it was only ever measured at one
