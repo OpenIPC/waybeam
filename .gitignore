@@ -48,3 +48,6 @@ a-*.d
 
 # CI-pinned SDK checkouts (.github/workflows/main.yml lint-build-cv610)
 .deps/
+
+# drivers/cv610 kernel build output (make drivers-cv610, CI kmod-cv610)
+drivers/cv610/build/

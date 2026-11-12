@@ -112,8 +112,10 @@ make sensor-cv610 SOC_BUILD=cv610 \
 Install `out/cv610/waybeam` as `/usr/bin/waybeam`, the plugin
 `out/cv610/cv610/libsns_imx662.so` as `/usr/lib/cv610/libsns_imx662.so`, and
 start with
-`config/waybeam.default.cv610.json`. `make stage` also emits the tested CV610
-init script and platform profile:
+`config/waybeam.default.cv610.json`. When `make drivers-cv610` has built
+them, `make stage` also stages `out/cv610/cv610/open_sys_config_imx662.ko`
+and `open_pm_stub.ko`, which go to `/usr/lib/cv610/`. It always emits the
+tested CV610 init script and platform profile:
 
 ```sh
 cp out/cv610/S95waybeam /etc/init.d/S95waybeam
@@ -291,9 +293,11 @@ the frequency carried by the resolved mode to
 `/sys/module/open_sys_config/parameters/sns0_clk_hz` during bring-up — after
 `ENABLE_SENSOR_CLOCK`, which rewrites the same register, and before
 `UNRESET_SENSOR`. The parameter comes from
-`0002-hi3516cv6xx-runtime-sensor-clock.patch` in the OpenIPC firmware tree;
-against an older module the daemon warns, names the clock the mode needs,
-and continues on the boot-time clock.
+`drivers/cv610/sys_config-runtime-sensor-clock.patch`, built into
+`open_sys_config_imx662.ko` with `make drivers-cv610` alongside the PM stub
+the loader also needs (see `drivers/cv610/README.md`); OpenIPC's own
+sys_config fixes the clock at insmod. Against a module without it the daemon
+warns, names the clock the mode needs, and continues on the boot-time clock.
 
 ## Deferred phases
 

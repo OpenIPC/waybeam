@@ -1,5 +1,27 @@
 # History
 
+## [0.86.1] - 2026-11-11
+
+The kernel half of the CV610 sensor chain now lives here too, so 1080p100 is
+buildable from this tree rather than only from the snokvist/firmware
+package that carried it.
+
+- **`drivers/cv610/`** holds the two modules `init.d/load-cv610-online`
+  loads from `/usr/lib/cv610`: OpenHisilicon's hi3516cv6xx sys_config with
+  `sys_config-runtime-sensor-clock.patch` (the writable `sns0_clk_hz` the
+  daemon sets per mode, 27 MHz for 1080p100), installed as
+  `open_sys_config_imx662.ko`, and `open_pm_stub.ko`, which registers MPP
+  module 58 without touching hardware. Neither is in OpenIPC. Both come from
+  the snokvist/firmware CV610 bring-up, where 30/60/90/100 fps were each
+  measured at their nominal rate on one boot.
+- **`make drivers-cv610 KSRC_CV610=... CV610_SDK_INC=...`** builds them
+  against a configured hi3516cv6xx 5.10 kernel (never fetched, like
+  `KSRC_MARUKO`); `make stage` stages them into `out/cv610/cv610/` when
+  built, and says so when not.
+- **CI builds them** (`kmod-cv610`) against the pinned OpenHisilicon and
+  OpenIPC `hisilicon-hi3516cv6xx` kernel, so the patch cannot silently stop
+  applying.
+
 ## [0.86.0] - 2026-11-11
 
 **CV610 drives a Sony IMX335 as well as the IMX662**, chosen from the u-boot
