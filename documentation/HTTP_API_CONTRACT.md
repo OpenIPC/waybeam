@@ -108,7 +108,7 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.85.8",
+    "app_version": "0.86.0",
     "contract_version": "0.32.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
@@ -1753,9 +1753,11 @@ Every other mode then runs at the wrong rate, scaled by the clock ratio
 `framesSent` in `/api/v1/transport/status`.
 
 CV610 preserves the same envelope and `selected_pad` / `selected_mode` /
-`pads[].modes[]` shape. Its initial IMX662 backend reports one synthetic pad
-containing the four supported fixed-rate modes (1080p30/60 RAW12 and
-1080p90/100 RAW10); each entry has equal `min_fps` and `max_fps`.
+`pads[].modes[]` shape. It reports one synthetic pad holding the fixed-rate
+modes of the sensor `$SENSOR` names (see `docs/CV610_BACKEND.md`, "Sensor
+selection"); each entry has equal `min_fps` and `max_fps`. IMX662 lists four
+(1080p30/60 RAW12, 1080p90/100 RAW10); IMX335 lists five (2592x1944p30
+RAW12, 1296x972p60 binned, 1080p90 crop, 2592x1944p40, 2592x1520p30 crop).
 
 `selected_pad` / `selected_mode` are what bring-up **actually selected**, not
 what the config asks for — the backend publishes them once the pipeline is
@@ -1765,8 +1767,9 @@ healthy daemon is never observable: the HTTP server starts after the backend
 prepares.
 
 The `width` / `height` of a CV610 entry is what the **sensor captures**, not
-what is encoded. Every entry captures 1920x1080, and `video0.size` is the
-encoded geometry VPSS scales that capture down to.
+what is encoded (every IMX662 entry captures 1920x1080; IMX335 entries
+differ), and `video0.size` is the encoded geometry VPSS scales that capture
+down to.
 
 **Aspect ratio is preserved by cropping, gated on `isp.keepAspect`** (default
 `true`), the same rule and the same shared code Star6E and Maruko use. A
@@ -1780,9 +1783,10 @@ restores the plain stretch-to-fit.
 `sensor.mode` is an index into this list and wins outright; the mode's rate
 becomes the pipeline rate and `video0.fps` is left as written. With
 `sensor.mode` at `-1` (or any negative value, meaning auto) `video0.fps` is a
-**target** rather than a command: an exact match is used, otherwise the
-slowest mode still faster than the target, and a target above every mode
-clamps to the fastest. `sensor.index` accepts only `-1` or `0` — one synthetic
+**target** rather than a command, matched among the modes whose capture
+covers `video0.size` (all of them for `auto`, or when none does): an exact
+match is used, otherwise the slowest mode still faster than the target, and
+a target above every mode clamps to the fastest. `sensor.index` accepts only `-1` or `0` — one synthetic
 pad — and anything else is `409`, as is a `sensor.mode` past the end of the
 list.
 
@@ -1796,7 +1800,7 @@ resolution — `video0.size` in `/api/v1/config` is the encoded size, and
 
 Error `500 modes_failed` — `MI_SNR_QueryResCount` failed (e.g. sensor
 driver not loaded yet during a brief startup window). This SigmaStar query
-failure does not apply to CV610's static IMX662 table.
+failure does not apply to CV610's static per-sensor tables.
 
 ## QR Scanning (Star6E only)
 

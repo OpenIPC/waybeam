@@ -4,6 +4,7 @@
 #include "venc_config.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int expect_valid(const char *name, VencConfig *cfg, int valid)
@@ -22,6 +23,22 @@ static int expect(const char *name, int ok)
 	return ok ? 0 : 1;
 }
 
+/* The mode tests below are about the IMX662 table, which every assertion was
+ * written against; main() also clears SENSOR so validation sees it too. */
+static const Cv610Sensor *g_imx662;
+
+/* The first row at exactly this rate, or NULL: what the table lists, as
+ * opposed to what cv610_mode_select() would substitute. */
+static const Cv610SensorMode *mode_at_fps(const Cv610Sensor *s, uint32_t fps)
+{
+	size_t i;
+
+	for (i = 0; i < s->mode_count; i++)
+		if (s->modes[i].fps == fps)
+			return &s->modes[i];
+	return NULL;
+}
+
 /* The mode table is the single source of truth for video0.size, video0.fps,
  * the MIPI bit depth, and the sensor MCLK.  The clock is the one that fails
  * silently on hardware (wrong clock => rate scales by the ratio, with every
@@ -34,11 +51,12 @@ static int test_mode_table(void)
 	size_t i;
 	int failures = 0;
 
-	modes = cv610_mode_table(&count);
+	modes = g_imx662->modes;
+	count = g_imx662->mode_count;
 	failures += expect("modes_table_non_empty", modes != NULL && count > 0);
 
 	for (i = 0; i < count; i++) {
-		m = cv610_mode_for_fps(modes[i].fps);
+		m = mode_at_fps(g_imx662, modes[i].fps);
 		failures += expect("modes_every_entry_resolves", m == &modes[i]);
 		failures += expect("modes_clock_set", modes[i].sensor_clock_hz != 0);
 		failures += expect("modes_raw_bit_sane",
@@ -46,7 +64,7 @@ static int test_mode_table(void)
 	}
 
 	failures += expect("modes_reject_unknown_fps",
-		cv610_mode_for_fps(45) == NULL);
+		mode_at_fps(g_imx662, 45) == NULL);
 
 	/* Output geometry is checked against the mode, not matched to it: VPSS
 	 * scales the capture down to whatever video0.size asks for. */
@@ -83,8 +101,8 @@ static int test_mode_table(void)
 	/* Control: the 100 fps mode must not share the 30 fps mode's clock.
 	 * If these ever converge the whole table is suspect. */
 	{
-		const Cv610SensorMode *slow = cv610_mode_for_fps(30);
-		const Cv610SensorMode *fast = cv610_mode_for_fps(100);
+		const Cv610SensorMode *slow = mode_at_fps(g_imx662, 30);
+		const Cv610SensorMode *fast = mode_at_fps(g_imx662, 100);
 
 		failures += expect("modes_1080p30_and_1080p100_present",
 			slow != NULL && fast != NULL);
@@ -104,9 +122,10 @@ static int test_mode_table(void)
 static int select_ok(const char *name, int forced, uint32_t fps,
 	uint32_t want_fps)
 {
-	const Cv610SensorMode *table = cv610_mode_table(NULL);
+	const Cv610SensorMode *table = g_imx662->modes;
 	int idx = 999;
-	const Cv610SensorMode *m = cv610_mode_select(forced, fps, &idx);
+	const Cv610SensorMode *m = cv610_mode_select(g_imx662, forced, fps,
+		0, 0, &idx);
 
 	return expect(name, m != NULL && m->fps == want_fps &&
 		idx >= 0 && m == &table[idx]);
@@ -116,12 +135,11 @@ static int select_ok(const char *name, int forced, uint32_t fps,
  * if the table is ever reordered or extended. */
 static int fastest_mode_index(void)
 {
-	const Cv610SensorMode *table = cv610_mode_table(NULL);
-	size_t count = 0;
+	const Cv610SensorMode *table = g_imx662->modes;
+	size_t count = g_imx662->mode_count;
 	size_t i;
 	int best = 0;
 
-	cv610_mode_table(&count);
 	for (i = 1; i < count; i++)
 		if (table[i].fps > table[best].fps)
 			best = (int)i;
@@ -131,7 +149,8 @@ static int fastest_mode_index(void)
 static int select_rejects(const char *name, int forced, uint32_t fps)
 {
 	int idx = 999;
-	const Cv610SensorMode *m = cv610_mode_select(forced, fps, &idx);
+	const Cv610SensorMode *m = cv610_mode_select(g_imx662, forced, fps,
+		0, 0, &idx);
 
 	return expect(name, m == NULL && idx == -1);
 }
@@ -142,11 +161,9 @@ static int select_rejects(const char *name, int forced, uint32_t fps)
  * see cv610_mode_select(). */
 static int test_mode_select(void)
 {
-	const Cv610SensorMode *table = cv610_mode_table(NULL);
-	size_t count = 0;
+	const Cv610SensorMode *table = g_imx662->modes;
+	size_t count = g_imx662->mode_count;
 	int failures = 0;
-
-	cv610_mode_table(&count);
 
 	/* A forced index beats the requested rate outright. */
 	failures += select_ok("select_forced_beats_fps", 1, 100, table[1].fps);
@@ -173,6 +190,152 @@ static int test_mode_select(void)
 	/* No target at all: reject rather than invent a rate. */
 	failures += select_rejects("select_auto_zero_fps", -1, 0);
 
+	return failures;
+}
+
+/* The sensor table: what $SENSOR selects, and the IMX335 rows' contract with
+ * the plugin, which picks its mode from the capture size and rate alone. */
+static int test_sensor_table(void)
+{
+	const Cv610Sensor *imx335 = cv610_sensor_find("imx335");
+	int idx = -1;
+	size_t i, j;
+	int failures = 0;
+
+	failures += expect("sns_find_imx662", g_imx662 != NULL &&
+		strcmp(g_imx662->name, "imx662") == 0 && g_imx662->sns_id == 662);
+	failures += expect("sns_find_imx335", imx335 != NULL &&
+		imx335->sns_id == 335 && imx335->mode_count == 5);
+	failures += expect("sns_find_ignores_case",
+		cv610_sensor_find("IMX335") == imx335);
+	failures += expect("sns_find_unknown",
+		cv610_sensor_find("imx999") == NULL &&
+		cv610_sensor_find("") == NULL && cv610_sensor_find(NULL) == NULL);
+	/* Waybeam's own IMX662 plugin lives outside /usr/lib/sensors, so the
+	 * image's stock copy (which refuses 100 fps) cannot replace it. */
+	failures += expect("sns_imx662_plugin_is_ours",
+		strcmp(g_imx662->plugin_path,
+			"/usr/lib/cv610/libsns_imx662.so") == 0);
+	failures += expect("sns_imx335_plugin_is_the_images",
+		strcmp(imx335->plugin_path,
+			"/usr/lib/sensors/libsns_imx335.so") == 0 &&
+		strcmp(imx335->obj_symbol, "g_sns_imx335_obj") == 0);
+
+	/* Every IMX335 mode runs on the clock sys_config feeds an imx335. */
+	for (j = 0; j < imx335->mode_count; j++)
+		failures += expect("sns_imx335_mode_sane",
+			imx335->modes[j].sensor_clock_hz == 37125000u &&
+			(imx335->modes[j].raw_bit == 10 ||
+			 imx335->modes[j].raw_bit == 12));
+
+	/* The plugin tells rows apart by size and rate, so no two rows may share
+	 * both. */
+	for (i = 0; i < imx335->mode_count; i++) {
+		for (j = i + 1; j < imx335->mode_count; j++) {
+			const Cv610SensorMode *a = &imx335->modes[i];
+			const Cv610SensorMode *b = &imx335->modes[j];
+
+			failures += expect("sns_imx335_rows_distinct",
+				a->width != b->width || a->height != b->height ||
+				a->fps != b->fps);
+		}
+	}
+
+	/* 30 fps has two rows; the full 5 MP RAW12 one is listed first. */
+	failures += expect("sns_imx335_30_is_full_frame",
+		cv610_mode_select(imx335, -1, 30, 0, 0, &idx) ==
+			&imx335->modes[0] &&
+		idx == 0 && imx335->modes[0].height == 1944 &&
+		imx335->modes[0].raw_bit == 12);
+	failures += expect("sns_imx335_40_full_raw10",
+		cv610_mode_select(imx335, -1, 40, 0, 0, &idx) ==
+			&imx335->modes[3]);
+	failures += expect("sns_imx335_90_is_1080_crop",
+		cv610_mode_select(imx335, -1, 90, 0, 0, &idx) ==
+			&imx335->modes[2] &&
+		imx335->modes[2].width == 1920 && imx335->modes[2].height == 1080);
+	failures += expect("sns_imx335_forced_1520p",
+		cv610_mode_select(imx335, 4, 30, 0, 0, &idx) ==
+			&imx335->modes[4] &&
+		idx == 4 && imx335->modes[4].height == 1520);
+
+	/* The rate is matched among modes that capture the encode size, as on
+	 * SigmaStar: 60 fps at 720p is the binned row, at 1080p the binned row
+	 * would be an upscale, so the 90 fps crop -- the slowest that fits and
+	 * keeps up -- runs instead. */
+	failures += expect("sns_imx335_720p60_binned",
+		cv610_mode_select(imx335, -1, 60, 1280, 720, &idx) ==
+			&imx335->modes[1] && idx == 1);
+	failures += expect("sns_imx335_1080p60_uses_crop90",
+		cv610_mode_select(imx335, -1, 60, 1920, 1080, &idx) ==
+			&imx335->modes[2] && idx == 2);
+	failures += expect("sns_imx335_5mp60_clamps_to_40",
+		cv610_mode_select(imx335, -1, 60, 2592, 1944, &idx) ==
+			&imx335->modes[3] && idx == 3);
+	/* Auto encodes the capture, held to the multiple of 8 an explicit size
+	 * needs: only the binned row's 972 moves. */
+	{
+		uint32_t w = 0, h = 0;
+
+		cv610_mode_resolve_output(&imx335->modes[1], 0, 0, &w, &h);
+		failures += expect("sns_imx335_binned_auto_aligned",
+			w == 1296 && h == 968);
+		cv610_mode_resolve_output(&imx335->modes[0], 0, 0, &w, &h);
+		failures += expect("sns_imx335_full_auto_unchanged",
+			w == 2592 && h == 1944);
+	}
+	/* Nothing captures it: the rate alone decides, and the size check is
+	 * left to reject it. */
+	failures += expect("sns_imx335_no_fit_falls_back_to_rate",
+		cv610_mode_select(imx335, -1, 30, 4000, 3000, &idx) ==
+			&imx335->modes[0] && idx == 0);
+
+	/* SENSOR picks the row; anything it cannot name is IMX662. */
+	unsetenv("SENSOR");
+	failures += expect("sns_current_unset_is_imx662",
+		cv610_sensor_current() == g_imx662);
+	setenv("SENSOR", "", 1);
+	failures += expect("sns_current_empty_is_imx662",
+		cv610_sensor_current() == g_imx662);
+	setenv("SENSOR", "imx335", 1);
+	failures += expect("sns_current_imx335",
+		cv610_sensor_current() == imx335);
+	setenv("SENSOR", "sc4336p", 1);
+	failures += expect("sns_current_unsupported_is_imx662",
+		cv610_sensor_current() == g_imx662);
+	unsetenv("SENSOR");
+	return failures;
+}
+
+/* Validation reads the table of the sensor SENSOR names, so an index that
+ * exists only on IMX335 is valid there and an error on IMX662. */
+static int test_validate_imx335(void)
+{
+	VencConfig cfg;
+	int failures = 0;
+
+	venc_config_defaults(&cfg);
+	cfg.video0.fps = 30;
+	cfg.video0.width = 1920;
+	cfg.video0.height = 1080;
+	cfg.sensor.mode = 4;
+	failures += expect_valid("imx335_mode4_rejected_on_imx662", &cfg, 0);
+	setenv("SENSOR", "imx335", 1);
+	failures += expect_valid("imx335_mode4_accepted", &cfg, 1);
+	cfg.sensor.mode = -1;
+	cfg.video0.fps = 90;
+	failures += expect_valid("imx335_1080p90_crop", &cfg, 1);
+	/* 1080p60 resolves to the 1080p90 crop rather than to the binned mode,
+	 * which would be an upscale; past every capture it is still an error. */
+	cfg.video0.fps = 60;
+	failures += expect_valid("imx335_1080p60_via_crop", &cfg, 1);
+	cfg.video0.width = 1280;
+	cfg.video0.height = 720;
+	failures += expect_valid("imx335_720p60_binned", &cfg, 1);
+	cfg.video0.width = 2600;
+	cfg.video0.height = 1952;
+	failures += expect_valid("imx335_reject_upscale", &cfg, 0);
+	unsetenv("SENSOR");
 	return failures;
 }
 
@@ -283,13 +446,23 @@ static int test_encoder_config(void)
 int main(void)
 {
 	VencConfig cfg;
-	size_t mode_count = 0;
+	size_t mode_count;
 	int failures = 0;
+
+	/* Run against IMX662 whatever the build host exports. */
+	unsetenv("SENSOR");
+	g_imx662 = cv610_sensor_find("imx662");
+	if (g_imx662 == NULL) {
+		printf("  FAIL  sns_imx662_registered\n");
+		return 1;
+	}
+	mode_count = g_imx662->mode_count;
 
 	failures += test_mode_table();
 	failures += test_mode_select();
+	failures += test_sensor_table();
+	failures += test_validate_imx335();
 	failures += test_encoder_config();
-	cv610_mode_table(&mode_count);
 
 	venc_config_defaults(&cfg);
 	failures += expect_valid("cv610_defaults", &cfg, 1);
@@ -316,7 +489,7 @@ int main(void)
 	/* And that it names a real sensor mode rather than only passing the
 	 * generic range checks. */
 	failures += expect("cv610_default_names_a_mode",
-		cv610_mode_for_fps(cfg.video0.fps) != NULL);
+		mode_at_fps(g_imx662, cfg.video0.fps) != NULL);
 	/* A rate above every mode is no longer a config error — it selects the
 	 * fastest mode.  (This asserted rejection until the selector landed; the
 	 * substitution is what replaced it, not the removal of a check.) */

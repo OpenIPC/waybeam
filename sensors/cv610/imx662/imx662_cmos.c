@@ -448,7 +448,7 @@ static td_s32 cmos_get_isp_default(ot_vi_pipe vi_pipe, ot_isp_cmos_default *isp_
 					  &g_cmos_noise_calibration, sizeof(ot_isp_noise_calibration));
 
 	/* The ISP identifies the sensor by these. sns_id was 0, which disagrees
-	 * with cv610_pipeline.c's IMX662_SNS_ID -- that file already documents
+	 * with the sns_id cv610_modes.c binds the ISP to -- that table documents
 	 * the two as having to match -- and would misbind any future PQ .bin,
 	 * which is chip- and sensor-locked. sns_mode was never set at all. */
 	isp_def->sns_mode.sns_id        = IMX662_ID;

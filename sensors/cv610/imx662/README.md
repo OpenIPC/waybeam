@@ -17,7 +17,7 @@ make sensor-cv610 SOC_BUILD=cv610 \
   CV610_SDK_INC=/path/to/openhisilicon
 ```
 
-Install the result as `/usr/lib/sensors/libsns_imx662.so`. No proprietary
+Install the result as `/usr/lib/cv610/libsns_imx662.so`. No proprietary
 SDK source or binary is stored here; the build consumes the public sensor
 interface and `sensor_common.c` from the external OpenHisilicon checkout.
 

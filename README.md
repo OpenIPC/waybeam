@@ -20,8 +20,9 @@ Three build-time SoC backends share one source tree:
 
 - **Star6E** — SigmaStar Infinity6E (SSC30KQ, SSC338Q).
 - **Maruko** — SigmaStar Infinity6C (SSC378QE).
-- **CV610** — HiSilicon Hi3516CV610 with Sony IMX662 (initial streaming
-  backend; advanced controls are being added in phases under #220).
+- **CV610** — HiSilicon Hi3516CV610 with Sony IMX662 or IMX335, picked from
+  the u-boot `sensor` env (initial streaming backend; advanced controls are
+  being added in phases under #220).
 
 Each binary is produced from the same `make build` invocation with
 different `SOC_BUILD=` flags. SigmaStar MI vendor libraries are loaded via
@@ -102,7 +103,7 @@ Stage a deployable bundle with vendored libraries:
 make stage SOC_BUILD=star6e
 # Output: out/star6e/{waybeam,qr_decode} + out/star6e/lib/*.so
 # (Maruko also stages drivers/ + isp-bins/)
-# (CV610 also stages sensors/, S95waybeam, waybeam-cv610.conf, and waybeam.json)
+# (CV610 also stages cv610/ (for /usr/lib/cv610), S95waybeam, waybeam-cv610.conf, and waybeam.json)
 ```
 
 Run host tests:
@@ -395,7 +396,7 @@ curl http://<device-ip>:<port>/api/v1/version
 ```
 
 ```json
-{"ok":true,"data":{"app_version":"0.85.8","backend":"star6e","contract_version":"0.32.0","config_schema_version":"1.0.0"}}
+{"ok":true,"data":{"app_version":"0.86.0","backend":"star6e","contract_version":"0.32.0","config_schema_version":"1.0.0"}}
 ```
 
 #### GET /api/v1/config

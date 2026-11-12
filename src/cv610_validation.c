@@ -8,9 +8,9 @@
  * loading and staged HTTP mutations. */
 const char *cv610_validate_config(const VencConfig *cfg)
 {
+	const Cv610Sensor *sensor = cv610_sensor_current();
 	const Cv610SensorMode *mode;
 	VencOutputUri uri;
-	size_t mode_count = 0;
 	const char *err;
 
 	if (!cfg)
@@ -18,13 +18,15 @@ const char *cv610_validate_config(const VencConfig *cfg)
 	/* sensor.mode and video0.fps select the sensor mode together, the way
 	 * they do on SigmaStar: an explicit sensor.mode wins, otherwise the rate
 	 * is a target.  video0.size is the encoded size VPSS scales that capture
-	 * down to.  /api/v1/modes lists the modes. */
-	cv610_mode_table(&mode_count);
+	 * down to.  /api/v1/modes lists the modes of the sensor fitted. */
 	if (cfg->sensor.index > 0)
 		return "CV610 has a single sensor pad: sensor.index must be -1 or 0";
-	if (cfg->sensor.mode >= 0 && (size_t)cfg->sensor.mode >= mode_count)
-		return "CV610 sensor.mode is not an index listed by /api/v1/modes";
-	mode = cv610_mode_select(cfg->sensor.mode, cfg->video0.fps, NULL);
+	if (cfg->sensor.mode >= 0 &&
+		(size_t)cfg->sensor.mode >= sensor->mode_count)
+		return "CV610 sensor.mode is not an index listed by /api/v1/modes "
+			"for the sensor $SENSOR names";
+	mode = cv610_mode_select(sensor, cfg->sensor.mode, cfg->video0.fps,
+		cfg->video0.width, cfg->video0.height, NULL);
 	if (mode == NULL)
 		return "CV610 video0.fps must name a mode listed by /api/v1/modes";
 	err = cv610_mode_check_output(mode, cfg->video0.width,
