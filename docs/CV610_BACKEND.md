@@ -211,20 +211,27 @@ needs from the craft:
   parameter the IMX335 stays on the profile's clock (27 MHz for the default
   `sc4336p`) and runs slow. Keep the profile at a name the craft's sys_config
   knows — `sc4336p` always is.
-- **Enough MMZ for the 2592-wide rows.** VB is sized from the capture: the
-  2592x1944 and 2592x1520 rows need about 60–80 MiB, more than
-  `load-cv610-online`'s default 64 MiB MMZ (which also holds the ISP and
-  VENC buffers), so on that loader they fail `vb` init — and a `/set` that
-  selects one takes the daemon down at the restart it triggers. The binned
-  and 1080p crop rows need about 20–35 MiB. On the reference 128 MiB board
-  that MMZ (0x44000000 + 64 MiB) already reaches the top of RAM above the
-  kernel's `mem=64M`, so it cannot simply grow: a bigger one means a smaller
-  kernel `mem=`/`osmem` and `CV610_MMZ_START`/`CV610_MMZ_SIZE` moved with it,
-  all in `/etc/waybeam-cv610.conf` and the u-boot env together. OpenIPC's own
-  loader sizes MMZ from the u-boot env instead.
+- **MMZ for the 2592-wide rows.** VB is sized from the capture, so the
+  2592x1944 and 2592x1520 rows need the most MMZ. An estimate puts them at
+  about 60–80 MiB; that has not been measured, and they ran on the MMZ of a
+  stock OpenIPC image's loader (#131), which sizes it from the u-boot env
+  (`totalmem` minus `osmem`). Whether they fit `load-cv610-online`'s default
+  64 MiB (which also holds the ISP and VENC buffers) is untested; if they do
+  not, `vb` init fails and a `/set` that selects one takes the daemon down at
+  the restart it triggers. On the reference 128 MiB board that MMZ
+  (0x44000000 + 64 MiB) already reaches the top of RAM above the kernel's
+  `mem=64M`, so it cannot simply grow: a bigger one means a smaller kernel
+  `mem=`/`osmem` and `CV610_MMZ_START`/`CV610_MMZ_SIZE` moved with it, all in
+  `/etc/waybeam-cv610.conf` and the u-boot env together.
+- **5 MP output does not fit a 128 MiB board.** A 2592-wide capture encoded
+  at 1080p or below is fine, but `video0.size=2592x1944` gets the daemon
+  killed by the kernel's OOM killer there.
 
-The IMX335 rows were verified on hardware by DmtryJS (#126/#127) on a stock
-OpenIPC image's loader and memory layout, not on `load-cv610-online`.
+The IMX335 rows were verified on hardware by DmtryJS on a Hi3516CV610 +
+IMX335 with this code (`bc6af4a`, #131): all five modes, mirror/flip, the
+mode list and sensor resolution through the init script. That run used a
+stock OpenIPC image's module loader and memory layout, not
+`load-cv610-online`, whose modules are not in any image yet (#132).
 
 ## Sensor modes
 
