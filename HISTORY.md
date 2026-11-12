@@ -28,21 +28,23 @@ this tree needs now that the IMX335 driver lives in OpenIPC/openhisilicon.
   being rejected as an upscale of the binned mode. `video0.size=auto` encodes
   the capture rounded down to a multiple of 8 (1296x968 on the binned mode).
 - **On waybeam's own `load-cv610-online`,** the IMX335 needs the
-  `sns0_clk_hz` sys_config for its clock, and its 2592-wide rows need more
-  than the default 64 MiB MMZ (about 60-80 MiB of VB), which on a 128 MiB
-  board is already all the RAM above the kernel. Selecting one there fails
-  bring-up. The binned and 1080p crop rows fit as is. `CV610_MMZ_START` and
+  `sns0_clk_hz` sys_config for its clock, and its 2592-wide rows may need
+  more than the default 64 MiB MMZ (an unmeasured estimate of 60-80 MiB of
+  VB), which on a 128 MiB board is already all the RAM above the kernel; if
+  so, selecting one there fails bring-up. `CV610_MMZ_START` and
   `CV610_MMZ_SIZE` are now passed through from `/etc/waybeam-cv610.conf`, to
-  move together with the kernel's `mem=` on a board laid out for it.
+  move together with the kernel's `mem=` on a board laid out for it. 5 MP
+  *output* (`video0.size=2592x1944`) runs a 128 MiB board out of memory.
 - **Upgrade note: the IMX662 plugin moves to `/usr/lib/cv610/libsns_imx662.so`**
   and is staged at `out/cv610/cv610/`. OpenIPC images now install their own
   copy at `/usr/lib/sensors/`, which refuses 1080p100; keeping waybeam's out
   of that path means a sysupgrade cannot swap it in. A binary updated without
   its plugin fails with `dlopen /usr/lib/cv610/libsns_imx662.so`; a firmware
   package installing the old staged path now fails at build time instead.
-- Not hardware-verified as integrated here: the IMX335 rows were verified by
-  DmtryJS on a Hi3516CV610 + IMX335 under a stock OpenIPC image's loader and
-  memory layout, with the #126/#127 code.
+- Hardware-verified by DmtryJS on a Hi3516CV610 + IMX335 with this code
+  (`bc6af4a`): all five modes, mirror/flip, `/api/v1/modes` and the init
+  script's sensor resolution. That run used a stock OpenIPC image's module
+  loader and memory layout, not `load-cv610-online`.
 
 ## [0.85.8] - 2026-11-11
 
