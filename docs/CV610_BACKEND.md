@@ -214,16 +214,26 @@ needs from the craft:
 - **MMZ for the 2592-wide rows.** VB is sized from the capture, so the
   2592x1944 and 2592x1520 rows need the most MMZ. Measured on a 128 MiB
   Hi3516CV610 + IMX335 board at 1080p output (CMA in `/proc/meminfo`, which is
-  this kernel's equivalent of the missing `/proc/media-mem`): **94 MiB** of the
-  zone in use against 44 MiB for 1080p and 34 MiB for the binned row. They
-  therefore do not fit the 64 MiB `load-cv610-online` used to default to, and
-  they leave ~11 MiB of `MemAvailable` while they stream.
-- **Where the zone comes from.** The OpenIPC hi3516cv6xx kernel measures DRAM
-  and lays memory out itself (`hisi_mem`): it ignores the bootloader's
-  `totalmem`/`osmem` and any `mem=` on the command line ("64M of memory from
-  the bootloader ignored, DRAM is 128M"), and its parameters are read-only, so
-  the split cannot be moved from userspace at all. `load-cv610-online`
-  therefore reads `/sys/module/hisi_mem/parameters/{allocator,mmz}` -- the
+  this kernel's equivalent of the missing `/proc/media-mem`), with the VB pool
+  sizing of 0.86.1: **94 MiB** of the zone in use for 2592x1944 (modes 0 and
+  3) and 81 MiB for 2592x1520, against 44 MiB for 1080p and 34 MiB for the
+  binned row. They therefore do not fit the 64 MiB `load-cv610-online`
+  defaults to on a boot without `hisi_mem`, and they leave ~11 MiB of
+  `MemAvailable` while they stream. On such a boot the reference 128 MiB
+  board's zone (0x44000000 + 64 MiB) already reaches the top of RAM above the
+  kernel's `mem=64M`, so it can only grow together with a smaller kernel
+  `mem=` and `CV610_MMZ_START`/`CV610_MMZ_SIZE` moved with it, never SIZE
+  alone: past the end of RAM it is not a recoverable error. A mode whose VB
+  does not fit fails `vb` init, and a `/set` that selects it takes the daemon
+  down at the restart it triggers.
+- **Where the zone comes from.** A hi3516cv6xx kernel with `hisi_mem`
+  (OpenIPC images from OpenIPC/firmware #2638, October 2026, and later)
+  measures DRAM and lays memory out itself: it ignores `mem=` and the
+  bootloader's `totalmem`/`osmem` variables ("64M of memory from the
+  bootloader ignored, DRAM is 128M"). `CV610_MMZ_START`/`CV610_MMZ_SIZE`
+  cannot move that split; OpenIPC's `set_allocator`, which writes
+  `osmem=`/`mmz_allocator=`/`mmz=` into the bootargs, plus a reboot can.
+  `load-cv610-online` therefore reads `/sys/module/hisi_mem/parameters/{allocator,mmz}` -- the
   same source OpenIPC's own `load_hisilicon` uses -- and
   `CV610_MMZ_START`/`CV610_MMZ_SIZE` apply only on a boot without `hisi_mem`,
   where the zone is a bootloader carve-out, and only when the command line
@@ -245,8 +255,8 @@ sensor clock unavailable.
 `load-cv610-online` and `drivers/cv610` were run on that same board later:
 the loader brings up its own module set (no vendor `open_pm`), the daemon's
 `sns0_clk_hz` write is accepted (`37125000 -> CRG 0x8440 = 0x8010`), and each
-row delivers its nominal rate at 1080p output -- 30.2, 40.2, 60.1, 30.2 and
-90.1 fps for modes 0, 3, 1, 4 and 2. It needs the `hisi_mem`-derived allocator
+row delivers its nominal rate at 1080p output -- 30.1, 40.2, 60.1, 30.1 and
+90.2 fps for modes 0, 3, 1, 4 and 2. It needs the `hisi_mem`-derived allocator
 above; with `mmz_allocator=ot` it loads nothing.
 
 ## Sensor modes

@@ -23,8 +23,8 @@ WAYBEAM_ENABLED=1
 CV610_SENSOR_PROFILE=sc4336p
 CV610_AUDIO=0
 # MMZ placement for the loader; empty keeps its defaults (0x44000000, 64M).
-# Ignored where the kernel laid memory out itself (hisi_mem), which is every
-# OpenIPC CV610 image; see the platform conf before changing either.
+# Ignored where the kernel laid memory out itself (hisi_mem: OpenIPC/firmware
+# #2638, October 2026, and later); see the platform conf before changing either.
 CV610_MMZ_START=
 CV610_MMZ_SIZE=
 # The platform override is target-local by design.

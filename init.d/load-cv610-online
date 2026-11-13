@@ -6,12 +6,14 @@ set -u
 
 MODULE_DIR=${MODULE_DIR:-/lib/modules/$(uname -r)/hisilicon}
 ARTIFACT_DIR=${ARTIFACT_DIR:-/usr/lib/cv610}
-# The MMZ zone open_mmz is handed, and which allocator provides it. Both come
-# from the kernel that laid memory out, not from the bootloader: an OpenIPC
-# hi3516cv6xx kernel measures DRAM and publishes the result under
-# /sys/module/hisi_mem/parameters, ignoring totalmem/osmem and any mem= on
-# the command line ("64M of memory from the bootloader ignored, DRAM is
-# 128M"). Read it from there, the way OpenIPC's own load_hisilicon does.
+# The MMZ zone open_mmz is handed, and which allocator provides it. A
+# hi3516cv6xx kernel with hisi_mem (OpenIPC/firmware #2638, October 2026, and
+# later) measures DRAM, lays memory out itself and publishes the result under
+# /sys/module/hisi_mem/parameters, ignoring mem= and the u-boot env's
+# totalmem/osmem ("64M of memory from the bootloader ignored, DRAM is 128M");
+# both are read from there, the way OpenIPC's own load_hisilicon does.
+# Without hisi_mem the zone is a bootloader carve-out, taken from the
+# command line or from CV610_MMZ_START/SIZE below.
 #
 # This is not cosmetic. With hisi_mem present the zone lies INSIDE kernel
 # memory, so mmz_allocator=ot -- MMZ's own carve-out, which is what a
@@ -21,6 +23,7 @@ ARTIFACT_DIR=${ARTIFACT_DIR:-/usr/lib/cv610}
 #   MMZ conflict to kernel memory (0x40000000, 0x47FFFFFF)
 #   Add MMZ failed ... load mmz failed!
 HISI_MEM_PARAMS=${HISI_MEM_PARAMS:-/sys/module/hisi_mem/parameters}
+CV610_CMDLINE=${CV610_CMDLINE:-/proc/cmdline}
 MMZ_ALLOCATOR=ot
 MMZ_ZONE=anonymous,0,${CV610_MMZ_START:-0x44000000},${CV610_MMZ_SIZE:-64M}
 
@@ -32,20 +35,21 @@ note_mmz_ignored()
 	echo "note: $1; CV610_MMZ_START/SIZE ignored, open_mmz gets $MMZ_ZONE" >&2
 }
 
-if [ -r "$HISI_MEM_PARAMS/allocator" ]; then
-	MMZ_ALLOCATOR=$(cat "$HISI_MEM_PARAMS/allocator")
-	MMZ_ZONE=$(cat "$HISI_MEM_PARAMS/mmz")
-	# The kernel has reserved the range already and its own parameters are
-	# read-only, so nothing here can move it.
+hm_alloc=$(cat "$HISI_MEM_PARAMS/allocator" 2>/dev/null)
+hm_mmz=$(cat "$HISI_MEM_PARAMS/mmz" 2>/dev/null)
+if [ -n "$hm_alloc" ] && [ -n "$hm_mmz" ]; then
+	MMZ_ALLOCATOR=$hm_alloc
+	MMZ_ZONE=$hm_mmz
+	# The kernel has reserved the range already: CV610_MMZ_START/SIZE cannot
+	# move it; OpenIPC's set_allocator plus a reboot can.
 	if [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
 		note_mmz_ignored "the kernel laid memory out itself"
 	fi
 else
-	# No hisi_mem: the zone is a bootloader carve-out, named either by the
-	# platform conf or by mmz= on the command line -- the same range, seen
-	# from the kernel's side. CMA provides that one, not MMZ's allocator,
-	# and the command line is the later of the two words on the same boot.
-	cmdmz=$(awk -F= '$1 == "mmz" {print $2}' RS=' ' /proc/cmdline)
+	# No hisi_mem: the zone is a bootloader carve-out. A mmz= on the kernel
+	# command line wins over CV610_MMZ_START/SIZE, and CMA provides that
+	# zone rather than MMZ's own allocator.
+	cmdmz=$(awk -F= '$1 == "mmz" {print $2; exit}' RS=' ' "$CV610_CMDLINE")
 	if [ -n "${cmdmz:-}" ]; then
 		MMZ_ALLOCATOR=cma
 		MMZ_ZONE=$cmdmz
