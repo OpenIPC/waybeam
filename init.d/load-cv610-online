@@ -22,6 +22,10 @@ ARTIFACT_DIR=${ARTIFACT_DIR:-/usr/lib/cv610}
 #   Conflict MMZ: PHYS(0x42000000, 0x47FFFFFF), nBYTES=98304KB
 #   MMZ conflict to kernel memory (0x40000000, 0x47FFFFFF)
 #   Add MMZ failed ... load mmz failed!
+# Both paths can be overridden from the environment so the zone choice can be
+# tried without the kernel it describes: point HISI_MEM_PARAMS at a directory
+# holding `allocator` and `mmz` files, CV610_CMDLINE at a fake command line.
+# Test hooks only -- the platform conf does not set them.
 HISI_MEM_PARAMS=${HISI_MEM_PARAMS:-/sys/module/hisi_mem/parameters}
 CV610_CMDLINE=${CV610_CMDLINE:-/proc/cmdline}
 MMZ_ALLOCATOR=ot
@@ -42,12 +46,12 @@ hm_mmz=$(cat "$HISI_MEM_PARAMS/mmz" 2>/dev/null)
 # trade an empty mmz= for the MMZ conflict above.
 if [ -n "$hm_alloc" ]; then
 	MMZ_ALLOCATOR=$hm_alloc
+	# Possibly empty: start_modules refuses then, since the bootloader zone
+	# is no fallback here -- it lies inside the kernel's memory.
 	MMZ_ZONE=$hm_mmz
-	[ -n "$hm_mmz" ] ||
-		echo "warning: hisi_mem publishes an allocator but no mmz zone" >&2
 	# The kernel has reserved the range already: CV610_MMZ_START/SIZE cannot
 	# move it; OpenIPC's set_allocator plus a reboot can.
-	if [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
+	if [ -n "$hm_mmz" ] && [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
 		warn_mmz_ignored "the kernel laid memory out itself"
 	fi
 else
@@ -69,6 +73,15 @@ SENSOR_PROFILE=${CV610_SENSOR_PROFILE:-imx662}
 # video-only module set stays the default boot path.
 AUDIO=${CV610_AUDIO:-0}
 loaded=""
+
+# Checked before anything is unloaded or loaded, so a refused start or restart
+# leaves the board exactly as it was.
+require_zone()
+{
+	[ -n "$MMZ_ZONE" ] && return 0
+	echo "hisi_mem publishes an allocator but no mmz zone; not loading" >&2
+	return 1
+}
 
 is_loaded()
 {
@@ -178,6 +191,7 @@ start_modules()
 		echo "refusing dirty MPP module state" >&2
 		return 1
 	}
+	require_zone || return 1
 
 	trap cleanup_partial EXIT HUP INT TERM
 	echo "load patched open_sys_config"
@@ -280,7 +294,7 @@ case "${1:-}" in
 	start) start_modules ;;
 	stop) stop_modules ;;
 	restart)
-		stop_modules && start_modules
+		require_zone && stop_modules && start_modules
 		;;
 	holders)
 		# Callers that must decide *before* destroying state ask here, passing

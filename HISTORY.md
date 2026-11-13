@@ -19,7 +19,10 @@ instead of naming one from the bootloader's side.
   (or `cma`, for a `mmz=` carve-out) on a boot without `hisi_mem`.
   `CV610_MMZ_START`/`CV610_MMZ_SIZE` apply only in that second case, and
   only when the command line does not name the carve-out with `mmz=`; the
-  loader says which of the two overrode them.
+  loader says which of the two overrode them. If `hisi_mem` publishes an
+  allocator but no zone, `start` and `restart` refuse with an error and
+  exit 1 before touching any module: the bootloader zone is no fallback on
+  such a kernel.
 - **Measured, not estimated: the 2592x1944 IMX335 rows take 94 MiB of MMZ**
   at 1080p output, against 81 MiB for 2592x1520, 44 MiB for 1080p and 34 MiB
   for the binned row, with 0.86.1's VB pool sizing. On a `hisi_mem` kernel
