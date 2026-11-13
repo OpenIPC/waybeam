@@ -88,7 +88,6 @@ typedef struct {
 	unsigned int out_width;    /* VPSS output = encoded size */
 	unsigned int out_height;
 	int          keep_aspect;  /* isp.keepAspect: crop before scaling */
-	int          vi_online;    /* VI -> ISP -> VPSS online/realtime mode */
 	int          mirror;       /* image.mirror: sensor H reverse */
 	int          flip;         /* image.flip:   sensor V reverse */
 	const Cv610Sensor *sensor; /* plugin to load, id the ISP binds */
@@ -253,46 +252,22 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 {
 	ot_vb_cfg vb;
 	ot_vi_vpss_mode vi_vpss_mode;
-	ot_vi_vpss_mode_type pipe_mode;
-	td_u64 raw_blk, yuv_blk, out_blk;
 	td_s32 sys_ret, vb_ret, set_ret, isp_ret;
 	unsigned int i;
 
-	/* RAW12 is stored 16bpp in the pipe buffers; be generous, this is a probe. */
-	raw_blk = (td_u64)c->width * c->height * 2 + 0x4000;
-	yuv_blk = (td_u64)c->width * c->height * 3 / 2 + 0x4000;
-	out_blk = (td_u64)c->out_width * c->out_height * 3 / 2 + 0x4000;
-
+	/* VI -> ISP -> VPSS all online: neither the RAW capture nor a full-size
+	 * YUV frame lands in VB, only VPSS's output does (VENC and the snapshot
+	 * channel read it) -- the vendor's own CV610 sample gives this mode no
+	 * RAW and no YUV blocks.  The VI-online/VPSS-offline graph this replaces
+	 * also held 4 RAW frames that nothing touched (min_free == blk_cnt in
+	 * /proc/umap/vb) and 4 capture-size YUV frames: ~67 MiB at 2592x1944;
+	 * at 1:1 1080p, where the output pool takes the YUV pool's place, the
+	 * RAW pool alone (~16 MB). */
 	memset(&vb, 0, sizeof(vb));
-	if (c->vi_online) {
-		/* VI -> ISP -> VPSS all online: neither the RAW capture nor the
-		 * full-size YUV ever lands in VB, only VPSS's output does (VENC and
-		 * the snapshot channel read it).  The vendor's own CV610 sample
-		 * gives this mode no RAW and no YUV blocks.  With VPSS offline the
-		 * RAW pool sat untouched (min_free == blk_cnt in /proc/umap/vb) and
-		 * the capture-size YUV pool cost 4 full frames: 67 MiB of the
-		 * 2592x1944 rows' VB, 28 MiB of 1080p's. */
-		pipe_mode = OT_VI_ONLINE_VPSS_ONLINE;
-		vb.max_pool_cnt = 1;
-		vb.common_pool[0].blk_size = out_blk;
-		vb.common_pool[0].blk_cnt  = 4;
-	} else {
-		pipe_mode = OT_VI_OFFLINE_VPSS_OFFLINE;
-		vb.max_pool_cnt = 2;
-		vb.common_pool[0].blk_size = raw_blk;
-		vb.common_pool[0].blk_cnt  = 4;
-		vb.common_pool[1].blk_size = yuv_blk;
-		vb.common_pool[1].blk_cnt  = 4;
-		/* VPSS writes its scaled output to VB.  When it is smaller than
-		 * the capture it needs a pool of its own -- VB hands out the
-		 * smallest block that fits, so without this the capture pool would
-		 * be consumed a frame at a time for a smaller picture. */
-		if (out_blk < yuv_blk) {
-			vb.max_pool_cnt = 3;
-			vb.common_pool[2].blk_size = out_blk;
-			vb.common_pool[2].blk_cnt  = 4;
-		}
-	}
+	vb.max_pool_cnt = 1;
+	vb.common_pool[0].blk_size =
+		(td_u64)c->out_width * c->out_height * 3 / 2 + 0x4000;
+	vb.common_pool[0].blk_cnt  = 4;
 
 	/* VB/SYS state lives in the kernel and survives the process that created
 	 * it, and only the creating process may tear it down — so after a crashed
@@ -319,7 +294,7 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 	for (i = 0; i < OT_VI_MAX_PIPE_NUM; i++) {
 		vi_vpss_mode.mode[i] = OT_VI_OFFLINE_VPSS_OFFLINE;
 	}
-	vi_vpss_mode.mode[VI_PIPE] = pipe_mode;
+	vi_vpss_mode.mode[VI_PIPE] = OT_VI_ONLINE_VPSS_ONLINE;
 
 	set_ret = ss_mpi_vb_set_cfg(&vb);
 	if (set_ret != TD_SUCCESS) {
@@ -351,23 +326,19 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 		printf("  ok  ss_mpi_vb_set_cfg\n");
 	}
 	CV610_CHECK_OR_BUSY(ss_mpi_vb_init());
-	if (c->vi_online) {
-		/* Online mode can only be selected after a complete SYS init. Do not
-		 * hide a half-initialized module set behind the usual BUSY tolerance. */
-		CV610_CHECK(ss_mpi_sys_init());
-		CV610_CHECK(ss_mpi_sys_set_vi_vpss_mode(&vi_vpss_mode));
-		CV610_CHECK(ss_mpi_sys_set_vi_aiisp_mode(VI_PIPE, OT_VI_AIISP_MODE_DEFAULT));
-		memset(&vi_vpss_mode, 0, sizeof(vi_vpss_mode));
-		CV610_CHECK(ss_mpi_sys_get_vi_vpss_mode(&vi_vpss_mode));
-		if (vi_vpss_mode.mode[VI_PIPE] != pipe_mode) {
-			fprintf(stderr, "FAIL VI pipe %d mode readback = %d\n", VI_PIPE,
-					vi_vpss_mode.mode[VI_PIPE]);
-			return -1;
-		}
-	} else {
-		CV610_CHECK_OR_BUSY(ss_mpi_sys_init());
+	/* Online mode can only be selected after a complete SYS init. Do not
+	 * hide a half-initialized module set behind the usual BUSY tolerance. */
+	CV610_CHECK(ss_mpi_sys_init());
+	CV610_CHECK(ss_mpi_sys_set_vi_vpss_mode(&vi_vpss_mode));
+	CV610_CHECK(ss_mpi_sys_set_vi_aiisp_mode(VI_PIPE, OT_VI_AIISP_MODE_DEFAULT));
+	memset(&vi_vpss_mode, 0, sizeof(vi_vpss_mode));
+	CV610_CHECK(ss_mpi_sys_get_vi_vpss_mode(&vi_vpss_mode));
+	if (vi_vpss_mode.mode[VI_PIPE] != OT_VI_ONLINE_VPSS_ONLINE) {
+		fprintf(stderr, "FAIL VI pipe %d mode readback = %d\n", VI_PIPE,
+				vi_vpss_mode.mode[VI_PIPE]);
+		return -1;
 	}
-	printf("  ok  VI/ISP/VPSS mode: %s\n", c->vi_online ? "online" : "offline");
+	printf("  ok  VI/ISP/VPSS mode: online\n");
 	return 0;
 }
 
@@ -463,7 +434,9 @@ static int vi_start_chn(const Cv610PipelineRuntimeConfig *c)
 	 * kernel state on this SoC and a pipe that outlives a teardown keeps
 	 * whatever crop it was last given, so "skip the call when no crop is
 	 * needed" would inherit a stale rectangle from the previous run's
-	 * geometry.
+	 * geometry.  vi_setup() destroys the pipe before creating it precisely
+	 * so that cannot happen today -- this keeps it true without depending
+	 * on it.
 	 *
 	 * On VI, not VPSS: with VPSS online behind VI, ss_mpi_vpss_set_grp_crop()
 	 * refuses every call (0xa0078007, a disabled crop included), and the
@@ -735,7 +708,6 @@ static int vpss_setup(const Cv610PipelineRuntimeConfig *c)
 	chn_attr.frame_rate.src_frame_rate = -1;
 	chn_attr.frame_rate.dst_frame_rate = -1;
 	CV610_CHECK(ss_mpi_vpss_set_chn_attr(VPSS_GRP, VPSS_CHN, &chn_attr));
-
 	CV610_CHECK(ss_mpi_vpss_enable_chn(VPSS_GRP, VPSS_CHN));
 	CV610_CHECK(ss_mpi_vpss_start_grp(VPSS_GRP));
 
@@ -746,15 +718,22 @@ static int vpss_setup(const Cv610PipelineRuntimeConfig *c)
 	dst.dev_id = VPSS_GRP;
 	dst.chn_id = 0;
 	CV610_CHECK(ss_mpi_sys_bind(&src, &dst));
-	printf("  ok  VPSS %ux%u -> %ux%u%s\n", c->width, c->height,
-		c->out_width, c->out_height,
-		(c->out_width == c->width && c->out_height == c->height) ?
-			" (1:1)" : " (scaled)");
+	/* VPSS's input is VI's output: the capture, or its aspect crop. */
+	{
+		PipelinePrecropRect in = pipeline_common_compute_precrop(
+			c->width, c->height, c->out_width, c->out_height,
+			c->keep_aspect ? true : false);
+
+		printf("  ok  VPSS %ux%u -> %ux%u%s\n", (unsigned)in.w,
+			(unsigned)in.h, c->out_width, c->out_height,
+			(c->out_width == in.w && c->out_height == in.h) ?
+				" (1:1)" : " (scaled)");
+	}
 	return 0;
 }
 
 /* Unconditional, like the VI and ISP teardown below: vpss_setup() can fail
- * at any of its four steps, and a group created by an earlier step is kernel
+ * at any of its steps, and a group created by an earlier step is kernel
  * state that outlives this process.  Skipping the destroy would leave grp 0
  * behind, and the next start — a respawn reloads no modules — would fail
  * create_grp with EXIST and never recover.  Each call is a no-op returning an
@@ -827,7 +806,6 @@ int cv610_pipeline_start(const Cv610PipelineConfig *config)
 	c.out_width = config->out_width;
 	c.out_height = config->out_height;
 	c.keep_aspect = config->keep_aspect;
-	c.vi_online = config->vi_online;
 	c.mirror = config->mirror ? 1 : 0;
 	c.flip = config->flip ? 1 : 0;
 	c.sensor = config->sensor;

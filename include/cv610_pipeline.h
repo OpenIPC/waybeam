@@ -38,7 +38,6 @@ typedef struct {
 	/* MCLK this mode's sensor line timing assumes.  Zero leaves whatever
 	 * the loader set, which suits exactly one mode. */
 	uint32_t sensor_clock_hz;
-	int vi_online;
 	int i2c_bus;
 } Cv610PipelineConfig;
 
