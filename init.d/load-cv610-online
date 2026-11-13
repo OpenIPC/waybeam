@@ -29,10 +29,10 @@ MMZ_ZONE=anonymous,0,${CV610_MMZ_START:-0x44000000},${CV610_MMZ_SIZE:-64M}
 
 # The platform conf offers START/SIZE as the way to move the zone, so when
 # something else owns it -- the kernel's own layout, or a mmz= carve-out named
-# on the command line -- say so instead of swallowing what an operator set.
-note_mmz_ignored()
+# on the command line -- warn instead of swallowing what an operator set.
+warn_mmz_ignored()
 {
-	echo "note: $1; CV610_MMZ_START/SIZE ignored, open_mmz gets $MMZ_ZONE" >&2
+	echo "warning: $1; CV610_MMZ_START/SIZE ignored, open_mmz gets $MMZ_ZONE" >&2
 }
 
 hm_alloc=$(cat "$HISI_MEM_PARAMS/allocator" 2>/dev/null)
@@ -48,7 +48,7 @@ if [ -n "$hm_alloc" ]; then
 	# The kernel has reserved the range already: CV610_MMZ_START/SIZE cannot
 	# move it; OpenIPC's set_allocator plus a reboot can.
 	if [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
-		note_mmz_ignored "the kernel laid memory out itself"
+		warn_mmz_ignored "the kernel laid memory out itself"
 	fi
 else
 	# No hisi_mem: the zone is a bootloader carve-out. The first mmz= on the
@@ -59,7 +59,7 @@ else
 		MMZ_ALLOCATOR=cma
 		MMZ_ZONE=$cmdmz
 		if [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
-			note_mmz_ignored "the command line names the carve-out"
+			warn_mmz_ignored "the command line names the carve-out"
 		fi
 	fi
 fi
