@@ -452,6 +452,46 @@ static int vi_start_chn(const Cv610PipelineRuntimeConfig *c)
 	chn_attr.frame_rate_ctrl.dst_frame_rate = OT_VI_INVALID_FRAME_RATE;
 
 	CV610_CHECK(ss_mpi_vi_set_chn_attr(VI_PIPE, VI_CHN, &chn_attr));
+	/* Aspect: VPSS scales whatever VI hands it, so without this a 4:3
+	 * video0.size out of a 16:9 capture is squashed rather than framed.
+	 * Crop the pipe's post-ISP output to the encoded aspect first (the ISP
+	 * still meters the whole capture) -- the same centre-crop
+	 * rule Star6E and Maruko apply through pipeline_common_compute_precrop(),
+	 * from the same shared function so the three backends cannot drift.
+	 *
+	 * Written UNCONDITIONALLY, including the disable.  MPP objects are
+	 * kernel state on this SoC and a pipe that outlives a teardown keeps
+	 * whatever crop it was last given, so "skip the call when no crop is
+	 * needed" would inherit a stale rectangle from the previous run's
+	 * geometry.
+	 *
+	 * On VI, not VPSS: with VPSS online behind VI, ss_mpi_vpss_set_grp_crop()
+	 * refuses every call (0xa0078007, a disabled crop included), and the
+	 * VPSS channel crop is accepted but applied short -- 1440 wide at x=240
+	 * came out 1200 wide (trim_width in /proc/umap/vpss), so VENC dropped
+	 * every frame.  The VI channel crop is NOT_SUPPORT (0xa010800c) on
+	 * this chip.  All hardware-checked on the IMX662 at 1440x1080. */
+	{
+		PipelinePrecropRect precrop = pipeline_common_compute_precrop(
+			c->width, c->height, c->out_width, c->out_height,
+			c->keep_aspect ? true : false);
+		int cropping = (precrop.w != c->width || precrop.h != c->height);
+		ot_crop_info crop;
+
+		memset(&crop, 0, sizeof(crop));
+		crop.enable = cropping ? TD_TRUE : TD_FALSE;
+		crop.rect.x = precrop.x;
+		crop.rect.y = precrop.y;
+		crop.rect.width = precrop.w;
+		crop.rect.height = precrop.h;
+		CV610_CHECK(ss_mpi_vi_set_pipe_post_crop(VI_PIPE, &crop));
+		if (cropping)
+			printf("  ok  aspect crop %ux%u+%u+%u of %ux%u -> %ux%u\n",
+				(unsigned)precrop.w, (unsigned)precrop.h,
+				(unsigned)precrop.x, (unsigned)precrop.y,
+				c->width, c->height, c->out_width, c->out_height);
+	}
+
 	CV610_CHECK(ss_mpi_vi_enable_chn(VI_PIPE, VI_CHN));
 
 	/* isp_mem_init asks the VI kernel export vi_get_pipe_hdr_attr() for this
@@ -695,46 +735,6 @@ static int vpss_setup(const Cv610PipelineRuntimeConfig *c)
 	chn_attr.frame_rate.src_frame_rate = -1;
 	chn_attr.frame_rate.dst_frame_rate = -1;
 	CV610_CHECK(ss_mpi_vpss_set_chn_attr(VPSS_GRP, VPSS_CHN, &chn_attr));
-
-	/* Aspect: the channel scales whatever the group hands it, so without
-	 * this a 4:3 video0.size out of a 16:9 capture is squashed rather than
-	 * framed.  Crop the channel's input to the encoded aspect before it
-	 * scales — the same centre-crop rule Star6E and Maruko apply through
-	 * pipeline_common_compute_precrop(), from the same shared function so
-	 * the three backends cannot drift.
-	 *
-	 * Written UNCONDITIONALLY, including the disable.  MPP objects are
-	 * kernel state on this SoC and a group that outlives a teardown keeps
-	 * whatever crop its channel was last given, so "skip the call when no crop is
-	 * needed" would inherit a stale rectangle from the previous run's
-	 * geometry.  vpss_teardown() destroys the group precisely so that
-	 * cannot happen today — this keeps it true without depending on it.
-	 *
-	 * The CHANNEL crop, not the group's: with VPSS online behind VI,
-	 * ss_mpi_vpss_set_grp_crop() refuses every call, a disabled crop
-	 * included, with 0xa0078007 (ILLEGAL_PARAM, hardware-checked), while
-	 * the channel crop does the same job for this one-channel graph. */
-	{
-		PipelinePrecropRect precrop = pipeline_common_compute_precrop(
-			c->width, c->height, c->out_width, c->out_height,
-			c->keep_aspect ? true : false);
-		int cropping = (precrop.w != c->width || precrop.h != c->height);
-		ot_vpss_crop_info crop;
-
-		memset(&crop, 0, sizeof(crop));
-		crop.enable = cropping ? TD_TRUE : TD_FALSE;
-		crop.crop_mode = OT_COORD_ABS;
-		crop.crop_rect.x = precrop.x;
-		crop.crop_rect.y = precrop.y;
-		crop.crop_rect.width = precrop.w;
-		crop.crop_rect.height = precrop.h;
-		CV610_CHECK(ss_mpi_vpss_set_chn_crop(VPSS_GRP, VPSS_CHN, &crop));
-		if (cropping)
-			printf("  ok  aspect crop %ux%u+%u+%u of %ux%u -> %ux%u\n",
-				(unsigned)precrop.w, (unsigned)precrop.h,
-				(unsigned)precrop.x, (unsigned)precrop.y,
-				c->width, c->height, c->out_width, c->out_height);
-	}
 
 	CV610_CHECK(ss_mpi_vpss_enable_chn(VPSS_GRP, VPSS_CHN));
 	CV610_CHECK(ss_mpi_vpss_start_grp(VPSS_GRP));
