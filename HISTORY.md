@@ -1,5 +1,30 @@
 # History
 
+## [0.86.4] - 2026-11-13
+
+A CV610 tuning `.bin` no longer changes the sensor mode underneath the
+pipeline.
+
+- **Fixed: a `.bin` captured at another frame rate stopped the stream.** The
+  vendor import writes the ISP frame rate and window the tune was captured in.
+  A 100 fps IMX662 tune under a 1080p30 pipeline set the ISP to 100 fps, and
+  the plugin switched the sensor to its 100 fps RAW10 profile while MIPI, VI
+  and VPSS still expected RAW12 at 30. The link carried garbage: CRC/ECC
+  errors by the hundred thousand in `/proc/umap/mipi_rx`, one encoded frame,
+  and no error anywhere. `cv610_pq_bin_import()` now restores the running
+  frame rate, window, sensor mode, WDR mode and Bayer order when the import
+  changed them, and warns, naming both. It does so even when the vendor call
+  reports failure, since that can come after the ISP half has landed. The ISP's own copy of the rate needs
+  a real change to be rewritten, so when the rate moved the restore steps 0.01 fps
+  lower (still inside the running mode) for a few frames first; without that, the ISP asked the sensor for the `.bin`'s rate
+  on every frame (~90 refused requests and log lines a second). Measured on a
+  Hi3516CV610 + IMX662 with a 100 fps tune: 1080p30 29.87 fps (was 0), and
+  720p100 with the same tune unchanged at 99.94 fps, no warning.
+- The IMX662 plugin's refusal of a rate outside the running mode now says
+  so: "IMX662 100.00 fps is outside the running IMX662_2M_30FPS_12BIT_LINEAR mode's
+  5-30 fps; another mode needs a pipeline restart". The old "Unsupported
+  IMX662 fps: 100.000000" read as if the sensor could not do 100 fps at all.
+
 ## [0.86.3] - 2026-11-13
 
 CV610 stops allocating frames nothing reads: VI, ISP and VPSS now run online.
