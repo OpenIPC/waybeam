@@ -88,7 +88,7 @@ typedef struct {
 	unsigned int out_width;    /* VPSS output = encoded size */
 	unsigned int out_height;
 	int          keep_aspect;  /* isp.keepAspect: crop before scaling */
-	int          vi_online;    /* VI -> ISP online/realtime mode */
+	int          vi_online;    /* VI -> ISP -> VPSS online/realtime mode */
 	int          mirror;       /* image.mirror: sensor H reverse */
 	int          flip;         /* image.flip:   sensor V reverse */
 	const Cv610Sensor *sensor; /* plugin to load, id the ISP binds */
@@ -253,6 +253,7 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 {
 	ot_vb_cfg vb;
 	ot_vi_vpss_mode vi_vpss_mode;
+	ot_vi_vpss_mode_type pipe_mode;
 	td_u64 raw_blk, yuv_blk, out_blk;
 	td_s32 sys_ret, vb_ret, set_ret, isp_ret;
 	unsigned int i;
@@ -263,19 +264,34 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 	out_blk = (td_u64)c->out_width * c->out_height * 3 / 2 + 0x4000;
 
 	memset(&vb, 0, sizeof(vb));
-	vb.max_pool_cnt = 2;
-	vb.common_pool[0].blk_size = raw_blk;
-	vb.common_pool[0].blk_cnt  = 4;
-	vb.common_pool[1].blk_size = yuv_blk;
-	vb.common_pool[1].blk_cnt  = 4;
-	/* VPSS writes its scaled output to VB.  When it is smaller than the
-	 * capture it needs a pool of its own — VB hands out the smallest block
-	 * that fits, so without this the 1080p pool would be consumed a frame at
-	 * a time for a 720p picture. */
-	if (out_blk < yuv_blk) {
-		vb.max_pool_cnt = 3;
-		vb.common_pool[2].blk_size = out_blk;
-		vb.common_pool[2].blk_cnt  = 4;
+	if (c->vi_online) {
+		/* VI -> ISP -> VPSS all online: neither the RAW capture nor the
+		 * full-size YUV ever lands in VB, only VPSS's output does (VENC and
+		 * the snapshot channel read it).  The vendor's own CV610 sample
+		 * gives this mode no RAW and no YUV blocks.  With VPSS offline the
+		 * RAW pool sat untouched (min_free == blk_cnt in /proc/umap/vb) and
+		 * the capture-size YUV pool cost 4 full frames: 67 MiB of the
+		 * 2592x1944 rows' VB, 28 MiB of 1080p's. */
+		pipe_mode = OT_VI_ONLINE_VPSS_ONLINE;
+		vb.max_pool_cnt = 1;
+		vb.common_pool[0].blk_size = out_blk;
+		vb.common_pool[0].blk_cnt  = 4;
+	} else {
+		pipe_mode = OT_VI_OFFLINE_VPSS_OFFLINE;
+		vb.max_pool_cnt = 2;
+		vb.common_pool[0].blk_size = raw_blk;
+		vb.common_pool[0].blk_cnt  = 4;
+		vb.common_pool[1].blk_size = yuv_blk;
+		vb.common_pool[1].blk_cnt  = 4;
+		/* VPSS writes its scaled output to VB.  When it is smaller than
+		 * the capture it needs a pool of its own -- VB hands out the
+		 * smallest block that fits, so without this the capture pool would
+		 * be consumed a frame at a time for a smaller picture. */
+		if (out_blk < yuv_blk) {
+			vb.max_pool_cnt = 3;
+			vb.common_pool[2].blk_size = out_blk;
+			vb.common_pool[2].blk_cnt  = 4;
+		}
 	}
 
 	/* VB/SYS state lives in the kernel and survives the process that created
@@ -303,9 +319,7 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 	for (i = 0; i < OT_VI_MAX_PIPE_NUM; i++) {
 		vi_vpss_mode.mode[i] = OT_VI_OFFLINE_VPSS_OFFLINE;
 	}
-	if (c->vi_online) {
-		vi_vpss_mode.mode[VI_PIPE] = OT_VI_ONLINE_VPSS_OFFLINE;
-	}
+	vi_vpss_mode.mode[VI_PIPE] = pipe_mode;
 
 	set_ret = ss_mpi_vb_set_cfg(&vb);
 	if (set_ret != TD_SUCCESS) {
@@ -345,7 +359,7 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 		CV610_CHECK(ss_mpi_sys_set_vi_aiisp_mode(VI_PIPE, OT_VI_AIISP_MODE_DEFAULT));
 		memset(&vi_vpss_mode, 0, sizeof(vi_vpss_mode));
 		CV610_CHECK(ss_mpi_sys_get_vi_vpss_mode(&vi_vpss_mode));
-		if (vi_vpss_mode.mode[VI_PIPE] != OT_VI_ONLINE_VPSS_OFFLINE) {
+		if (vi_vpss_mode.mode[VI_PIPE] != pipe_mode) {
 			fprintf(stderr, "FAIL VI pipe %d mode readback = %d\n", VI_PIPE,
 					vi_vpss_mode.mode[VI_PIPE]);
 			return -1;
@@ -353,7 +367,7 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 	} else {
 		CV610_CHECK_OR_BUSY(ss_mpi_sys_init());
 	}
-	printf("  ok  VI/ISP mode: %s\n", c->vi_online ? "online" : "offline");
+	printf("  ok  VI/ISP/VPSS mode: %s\n", c->vi_online ? "online" : "offline");
 	return 0;
 }
 
@@ -662,41 +676,6 @@ static int vpss_setup(const Cv610PipelineRuntimeConfig *c)
 	grp_attr.frame_rate.dst_frame_rate = -1;
 	CV610_CHECK(ss_mpi_vpss_create_grp(VPSS_GRP, &grp_attr));
 
-	/* Aspect: the channel below scales whatever the group hands it, so
-	 * without this a 4:3 video0.size out of a 16:9 capture is squashed
-	 * rather than framed.  Crop the group's input to the encoded aspect
-	 * first — the same centre-crop rule Star6E and Maruko apply through
-	 * pipeline_common_compute_precrop(), from the same shared function so
-	 * the three backends cannot drift.
-	 *
-	 * Written UNCONDITIONALLY, including the disable.  MPP objects are
-	 * kernel state on this SoC and a group that outlives a teardown keeps
-	 * whatever crop it was last given, so "skip the call when no crop is
-	 * needed" would inherit a stale rectangle from the previous run's
-	 * geometry.  vpss_teardown() destroys the group precisely so that
-	 * cannot happen today — this keeps it true without depending on it. */
-	{
-		PipelinePrecropRect precrop = pipeline_common_compute_precrop(
-			c->width, c->height, c->out_width, c->out_height,
-			c->keep_aspect ? true : false);
-		int cropping = (precrop.w != c->width || precrop.h != c->height);
-		ot_vpss_crop_info crop;
-
-		memset(&crop, 0, sizeof(crop));
-		crop.enable = cropping ? TD_TRUE : TD_FALSE;
-		crop.crop_mode = OT_COORD_ABS;
-		crop.crop_rect.x = precrop.x;
-		crop.crop_rect.y = precrop.y;
-		crop.crop_rect.width = precrop.w;
-		crop.crop_rect.height = precrop.h;
-		CV610_CHECK(ss_mpi_vpss_set_grp_crop(VPSS_GRP, &crop));
-		if (cropping)
-			printf("  ok  aspect crop %ux%u+%u+%u of %ux%u -> %ux%u\n",
-				(unsigned)precrop.w, (unsigned)precrop.h,
-				(unsigned)precrop.x, (unsigned)precrop.y,
-				c->width, c->height, c->out_width, c->out_height);
-	}
-
 	memset(&chn_attr, 0, sizeof(chn_attr));
 	chn_attr.width         = c->out_width;
 	chn_attr.height        = c->out_height;
@@ -716,6 +695,47 @@ static int vpss_setup(const Cv610PipelineRuntimeConfig *c)
 	chn_attr.frame_rate.src_frame_rate = -1;
 	chn_attr.frame_rate.dst_frame_rate = -1;
 	CV610_CHECK(ss_mpi_vpss_set_chn_attr(VPSS_GRP, VPSS_CHN, &chn_attr));
+
+	/* Aspect: the channel scales whatever the group hands it, so without
+	 * this a 4:3 video0.size out of a 16:9 capture is squashed rather than
+	 * framed.  Crop the channel's input to the encoded aspect before it
+	 * scales — the same centre-crop rule Star6E and Maruko apply through
+	 * pipeline_common_compute_precrop(), from the same shared function so
+	 * the three backends cannot drift.
+	 *
+	 * Written UNCONDITIONALLY, including the disable.  MPP objects are
+	 * kernel state on this SoC and a group that outlives a teardown keeps
+	 * whatever crop its channel was last given, so "skip the call when no crop is
+	 * needed" would inherit a stale rectangle from the previous run's
+	 * geometry.  vpss_teardown() destroys the group precisely so that
+	 * cannot happen today — this keeps it true without depending on it.
+	 *
+	 * The CHANNEL crop, not the group's: with VPSS online behind VI,
+	 * ss_mpi_vpss_set_grp_crop() refuses every call, a disabled crop
+	 * included, with 0xa0078007 (ILLEGAL_PARAM, hardware-checked), while
+	 * the channel crop does the same job for this one-channel graph. */
+	{
+		PipelinePrecropRect precrop = pipeline_common_compute_precrop(
+			c->width, c->height, c->out_width, c->out_height,
+			c->keep_aspect ? true : false);
+		int cropping = (precrop.w != c->width || precrop.h != c->height);
+		ot_vpss_crop_info crop;
+
+		memset(&crop, 0, sizeof(crop));
+		crop.enable = cropping ? TD_TRUE : TD_FALSE;
+		crop.crop_mode = OT_COORD_ABS;
+		crop.crop_rect.x = precrop.x;
+		crop.crop_rect.y = precrop.y;
+		crop.crop_rect.width = precrop.w;
+		crop.crop_rect.height = precrop.h;
+		CV610_CHECK(ss_mpi_vpss_set_chn_crop(VPSS_GRP, VPSS_CHN, &crop));
+		if (cropping)
+			printf("  ok  aspect crop %ux%u+%u+%u of %ux%u -> %ux%u\n",
+				(unsigned)precrop.w, (unsigned)precrop.h,
+				(unsigned)precrop.x, (unsigned)precrop.y,
+				c->width, c->height, c->out_width, c->out_height);
+	}
+
 	CV610_CHECK(ss_mpi_vpss_enable_chn(VPSS_GRP, VPSS_CHN));
 	CV610_CHECK(ss_mpi_vpss_start_grp(VPSS_GRP));
 
