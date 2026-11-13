@@ -396,6 +396,28 @@ static int vi_setup(const Cv610PipelineRuntimeConfig *c)
 	return 0;
 }
 
+/* The aspect crop VI applies before VPSS: the shared centre-crop rule, held
+ * to the 4-pixel grid the VI pipe post-crop demands -- the driver refuses
+ * anything else ("crop width should be 4 align, which is 1898", 0xa0108007,
+ * hardware-checked).  The shared helper rounds to 2 because Star6E and Maruko
+ * need no more.  An internal rectangle VPSS scales to video0.size, so the
+ * encoded size is unaffected: IMX335 2592x1944 -> 1080p crops 2592x1456
+ * instead of 2592x1458. */
+static PipelinePrecropRect cv610_aspect_crop(const Cv610PipelineRuntimeConfig *c)
+{
+	PipelinePrecropRect r = pipeline_common_compute_precrop(
+		c->width, c->height, c->out_width, c->out_height,
+		c->keep_aspect ? true : false);
+
+	if (r.w != c->width || r.h != c->height) {
+		r.w = (uint16_t)(r.w & ~3u);
+		r.h = (uint16_t)(r.h & ~3u);
+		r.x = (uint16_t)(((c->width - r.w) / 2) & ~3u);
+		r.y = (uint16_t)(((c->height - r.h) / 2) & ~3u);
+	}
+	return r;
+}
+
 static int vi_start_chn(const Cv610PipelineRuntimeConfig *c)
 {
 	ot_vi_chn_attr chn_attr;
@@ -445,9 +467,7 @@ static int vi_start_chn(const Cv610PipelineRuntimeConfig *c)
 	 * every frame.  The VI channel crop is NOT_SUPPORT (0xa010800c) on
 	 * this chip.  All hardware-checked on the IMX662 at 1440x1080. */
 	{
-		PipelinePrecropRect precrop = pipeline_common_compute_precrop(
-			c->width, c->height, c->out_width, c->out_height,
-			c->keep_aspect ? true : false);
+		PipelinePrecropRect precrop = cv610_aspect_crop(c);
 		int cropping = (precrop.w != c->width || precrop.h != c->height);
 		ot_crop_info crop;
 
@@ -720,9 +740,7 @@ static int vpss_setup(const Cv610PipelineRuntimeConfig *c)
 	CV610_CHECK(ss_mpi_sys_bind(&src, &dst));
 	/* VPSS's input is VI's output: the capture, or its aspect crop. */
 	{
-		PipelinePrecropRect in = pipeline_common_compute_precrop(
-			c->width, c->height, c->out_width, c->out_height,
-			c->keep_aspect ? true : false);
+		PipelinePrecropRect in = cv610_aspect_crop(c);
 
 		printf("  ok  VPSS %ux%u -> %ux%u%s\n", (unsigned)in.w,
 			(unsigned)in.h, c->out_width, c->out_height,
