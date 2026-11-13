@@ -216,16 +216,17 @@ needs from the craft:
   knows — `sc4336p` always is.
 - **MMZ for the 2592-wide rows.** Since 0.86.3 VB holds only VPSS's output,
   4 frames of the encoded size. Up to 0.86.2 it also held 4 RAW frames and 4
-  full-size YUV frames of the capture: measured on a 128 MiB Hi3516CV610 +
-  IMX335 board at 1080p output (CMA in `/proc/meminfo`, this kernel's
-  equivalent of the missing `/proc/media-mem`), **94 MiB** of the zone was in
-  use for 2592x1944 (modes 0 and 3) and 81 MiB for 2592x1520, against 44 MiB
-  for 1080p and 34 MiB for the binned row — more than the 64 MiB
-  `load-cv610-online` defaults to on a boot without `hisi_mem`. On the IMX662
-  the change measured 36.9 → 21.0 MiB at 1080p30 and 38.3 → 10.4 MiB at
-  720p100 (`/proc/umap/media-mem`). The IMX335 rows should drop by about
-  67 MiB of VB but have not been re-measured; the ISP and VI still keep
-  private buffers that follow the capture. Should a zone still be too small
+  full-size YUV frames of the capture, which on a 128 MiB Hi3516CV610 +
+  IMX335 board at 1080p output came to more than the 64 MiB
+  `load-cv610-online` defaults to on a boot without `hisi_mem`. MMZ in use
+  (`/proc/umap/media-mem`), before → after: on the IMX335 (DmtryJS, `hisi_mem`
+  96 MiB zone) 89.6 → 22.2 MiB for 2592x1944 (modes 0 and 3), 74.5 → 21.7 MiB
+  for 2592x1520, 36.8 → 20.9 MiB for 1080p90 and 27.0 → 10.0 MiB for the
+  binned row at 720p; on the IMX662 36.9 → 21.0 MiB at 1080p30 and 38.3 →
+  10.4 MiB at 720p100. (0.86.2's "94 MiB" for 2592x1944 was CMA in use from
+  `/proc/meminfo`, which reads higher than the zone's own count: 30.0 against
+  22.2 MiB on the same row after this change.) The ISP and VI still keep private buffers that
+  follow the capture. Should a zone still be too small
   on a boot without `hisi_mem`: on the reference 128 MiB board it
   (0x44000000 + 64 MiB) already reaches the top of RAM above the kernel's
   `mem=64M`, so it can only grow together with a smaller kernel `mem=` and
@@ -250,9 +251,10 @@ needs from the craft:
   the bootloader layout needs; against `hisi_mem` it is fatal, because the
   zone then lies inside kernel memory and `open_mmz` refuses the zone
   ("MMZ conflict to kernel memory") and loads no MPP modules at all.
-- **5 MP output does not fit a 128 MiB board.** A 2592-wide capture encoded
-  at 1080p or below is fine, but `video0.size=2592x1944` gets the daemon
-  killed by the kernel's OOM killer there.
+- **5 MP output fits a 128 MiB board since 0.86.3.** `video0.size=2592x1944`
+  on the IMX335 measured 49.3 MiB of MMZ in use at 30.00 fps (`hisi_mem`
+  96 MiB zone, 53.8 MiB `MemAvailable`). Up to 0.86.2 the capture-size RAW and
+  YUV pools on top of it got the daemon killed by the OOM killer.
 
 The IMX335 rows were verified on hardware by DmtryJS on a Hi3516CV610 +
 IMX335 with this code (`bc6af4a`, #131): all five modes, mirror/flip, the
