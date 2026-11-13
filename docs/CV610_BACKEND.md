@@ -217,15 +217,16 @@ needs from the craft:
   this kernel's equivalent of the missing `/proc/media-mem`), with the VB pool
   sizing of 0.86.1: **94 MiB** of the zone in use for 2592x1944 (modes 0 and
   3) and 81 MiB for 2592x1520, against 44 MiB for 1080p and 34 MiB for the
-  binned row. They therefore do not fit the 64 MiB `load-cv610-online`
-  defaults to on a boot without `hisi_mem`, and they leave ~11 MiB of
-  `MemAvailable` while they stream. On such a boot the reference 128 MiB
-  board's zone (0x44000000 + 64 MiB) already reaches the top of RAM above the
-  kernel's `mem=64M`, so it can only grow together with a smaller kernel
-  `mem=` and `CV610_MMZ_START`/`CV610_MMZ_SIZE` moved with it, never SIZE
-  alone: past the end of RAM it is not a recoverable error. A mode whose VB
-  does not fit fails `vb` init, and a `/set` that selects it takes the daemon
-  down at the restart it triggers.
+  binned row; on that board's 96 MiB `hisi_mem` zone the 2592x1944 rows left
+  ~11 MiB of `MemAvailable` while they streamed. They do not fit the 64 MiB
+  `load-cv610-online` defaults to on a boot without `hisi_mem`. On such a
+  boot the reference 128 MiB board's zone (0x44000000 + 64 MiB) already
+  reaches the top of RAM above the kernel's `mem=64M`, so it can only grow
+  together with a smaller kernel `mem=` and `CV610_MMZ_START`/
+  `CV610_MMZ_SIZE` moved with it, never SIZE alone: past the end of RAM it is
+  not a recoverable error. On any boot, a mode whose VB does not fit the zone
+  fails `vb` init, and a `/set` that selects it takes the daemon down at the
+  restart it triggers.
 - **Where the zone comes from.** A hi3516cv6xx kernel with `hisi_mem`
   (OpenIPC images from OpenIPC/firmware #2638, October 2026, and later)
   measures DRAM and lays memory out itself: it ignores `mem=` and the
@@ -233,8 +234,9 @@ needs from the craft:
   bootloader ignored, DRAM is 128M"). `CV610_MMZ_START`/`CV610_MMZ_SIZE`
   cannot move that split; OpenIPC's `set_allocator`, which writes
   `osmem=`/`mmz_allocator=`/`mmz=` into the bootargs, plus a reboot can.
-  `load-cv610-online` therefore reads `/sys/module/hisi_mem/parameters/{allocator,mmz}` -- the
-  same source OpenIPC's own `load_hisilicon` uses -- and
+  `load-cv610-online` therefore reads
+  `/sys/module/hisi_mem/parameters/{allocator,mmz}` -- the same source
+  OpenIPC's own `load_hisilicon` uses -- and
   `CV610_MMZ_START`/`CV610_MMZ_SIZE` apply only on a boot without `hisi_mem`,
   where the zone is a bootloader carve-out, and only when the command line
   does not name that carve-out itself with `mmz=`; either way the loader says

@@ -37,17 +37,22 @@ note_mmz_ignored()
 
 hm_alloc=$(cat "$HISI_MEM_PARAMS/allocator" 2>/dev/null)
 hm_mmz=$(cat "$HISI_MEM_PARAMS/mmz" 2>/dev/null)
-if [ -n "$hm_alloc" ] && [ -n "$hm_mmz" ]; then
+# Gated on the allocator alone, as load_hisilicon does: a kernel that
+# publishes one has laid memory out itself, so falling back to ot would only
+# trade an empty mmz= for the MMZ conflict above.
+if [ -n "$hm_alloc" ]; then
 	MMZ_ALLOCATOR=$hm_alloc
 	MMZ_ZONE=$hm_mmz
+	[ -n "$hm_mmz" ] ||
+		echo "warning: hisi_mem publishes an allocator but no mmz zone" >&2
 	# The kernel has reserved the range already: CV610_MMZ_START/SIZE cannot
 	# move it; OpenIPC's set_allocator plus a reboot can.
 	if [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
 		note_mmz_ignored "the kernel laid memory out itself"
 	fi
 else
-	# No hisi_mem: the zone is a bootloader carve-out. A mmz= on the kernel
-	# command line wins over CV610_MMZ_START/SIZE, and CMA provides that
+	# No hisi_mem: the zone is a bootloader carve-out. The first mmz= on the
+	# kernel command line wins over CV610_MMZ_START/SIZE, and CMA provides that
 	# zone rather than MMZ's own allocator.
 	cmdmz=$(awk -F= '$1 == "mmz" {print $2; exit}' RS=' ' "$CV610_CMDLINE")
 	if [ -n "${cmdmz:-}" ]; then
