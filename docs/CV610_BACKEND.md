@@ -65,9 +65,12 @@ mounts USB storage at `/mnt/sda1` — so `record.dir` has to be set for the
 target before recording will start. It is left at the shared default rather
 than hardcoding one board's mount point into a generic config.
 
-The graph uses VI-online mode, matching the standalone streamer's production
-path. The module loader must provide a clean SYS/VB lifecycle; the backend
-verifies the requested mode by reading it back before creating the VI pipe.
+The graph runs VI, ISP and VPSS all online (`OT_VI_ONLINE_VPSS_ONLINE`), the
+mode the vendor's own CV610 sample defaults to: neither the RAW capture nor a
+full-size YUV frame is written to VB, only VPSS's output, which VENC and the
+snapshot channel read. The module loader must provide a clean SYS/VB
+lifecycle; the backend verifies the requested mode by reading it back before
+creating the VI pipe.
 
 ## Encoder capability delta
 
@@ -211,22 +214,25 @@ needs from the craft:
   parameter the IMX335 stays on the profile's clock (27 MHz for the default
   `sc4336p`) and runs slow. Keep the profile at a name the craft's sys_config
   knows — `sc4336p` always is.
-- **MMZ for the 2592-wide rows.** VB is sized from the capture, so the
-  2592x1944 and 2592x1520 rows need the most MMZ. Measured on a 128 MiB
-  Hi3516CV610 + IMX335 board at 1080p output (CMA in `/proc/meminfo`, which is
-  this kernel's equivalent of the missing `/proc/media-mem`), with the VB pool
-  sizing of 0.86.1: **94 MiB** of the zone in use for 2592x1944 (modes 0 and
-  3) and 81 MiB for 2592x1520, against 44 MiB for 1080p and 34 MiB for the
-  binned row; on that board's 96 MiB `hisi_mem` zone the 2592x1944 rows left
-  ~11 MiB of `MemAvailable` while they streamed. They do not fit the 64 MiB
-  `load-cv610-online` defaults to on a boot without `hisi_mem`. On such a
-  boot the reference 128 MiB board's zone (0x44000000 + 64 MiB) already
-  reaches the top of RAM above the kernel's `mem=64M`, so it can only grow
-  together with a smaller kernel `mem=` and `CV610_MMZ_START`/
-  `CV610_MMZ_SIZE` moved with it, never SIZE alone: past the end of RAM it is
-  not a recoverable error. On any boot, a mode whose VB does not fit the zone
-  fails `vb` init, and a `/set` that selects it takes the daemon down at the
-  restart it triggers.
+- **MMZ for the 2592-wide rows.** Since 0.86.3 VB holds only VPSS's output,
+  4 frames of the encoded size. Up to 0.86.2 it also held 4 RAW frames and 4
+  full-size YUV frames of the capture: measured on a 128 MiB Hi3516CV610 +
+  IMX335 board at 1080p output (CMA in `/proc/meminfo`, this kernel's
+  equivalent of the missing `/proc/media-mem`), **94 MiB** of the zone was in
+  use for 2592x1944 (modes 0 and 3) and 81 MiB for 2592x1520, against 44 MiB
+  for 1080p and 34 MiB for the binned row — more than the 64 MiB
+  `load-cv610-online` defaults to on a boot without `hisi_mem`. On the IMX662
+  the change measured 36.9 → 21.0 MiB at 1080p30 and 38.3 → 10.4 MiB at
+  720p100 (`/proc/umap/media-mem`). The IMX335 rows should drop by about
+  67 MiB of VB but have not been re-measured; the ISP and VI still keep
+  private buffers that follow the capture. Should a zone still be too small
+  on a boot without `hisi_mem`: on the reference 128 MiB board it
+  (0x44000000 + 64 MiB) already reaches the top of RAM above the kernel's
+  `mem=64M`, so it can only grow together with a smaller kernel `mem=` and
+  `CV610_MMZ_START`/`CV610_MMZ_SIZE` moved with it, never SIZE alone: past
+  the end of RAM it is not a recoverable error. On any boot, a mode whose VB
+  does not fit the zone fails `vb` init, and a `/set` that selects it takes
+  the daemon down at the restart it triggers.
 - **Where the zone comes from.** A hi3516cv6xx kernel with `hisi_mem`
   (OpenIPC images from OpenIPC/firmware #2638, October 2026, and later)
   measures DRAM and lays memory out itself: it ignores `mem=` and the
@@ -272,6 +278,18 @@ the first row at that rate. `sensor.mode=4` picks the 2592x1520 crop instead.
 
 VPSS is created even when no scaling is asked for, so the 1:1 path and a
 scaled one exercise the same graph and the same teardown order.
+
+The aspect crop (`isp.keepAspect`, for a `video0.size` of another aspect than
+the capture) is the VI pipe's post-ISP crop: an internal rectangle VPSS then
+scales to `video0.size`, so the encoded size stays the one asked for. It is
+not a VPSS crop because, with VPSS online, `ss_mpi_vpss_set_grp_crop` refuses
+every call (`0xa0078007`, a disabled crop included) and the VPSS channel crop
+is accepted but applied short — 1440 wide at x=240 came out 1200 wide, so
+VENC dropped every frame — and the VI channel crop is `OT_ERR_NOT_SUPPORT` on
+this chip. The ISP still meters the whole capture. The post-crop must sit on
+a 4-pixel grid (`vi_check_crop_align`: "crop width should be 4 align"), so
+the centre crop is rounded to it — an IMX335 1080p crop is 2592x1456, not
+2592x1458.
 
 Two attribute values are not optional, both established by probing the
 hardware (`ss_mpi_vpss_set_chn_attr` returns `0xa0078007`,
