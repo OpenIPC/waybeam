@@ -14,7 +14,10 @@ pipeline.
   and no error anywhere. `cv610_pq_bin_import()` now restores the running
   frame rate, window, sensor mode, WDR mode and Bayer order when the import
   changed them, and warns, naming both. It does so even when the vendor call
-  reports failure, since that can come after the ISP half has landed. The ISP's own copy of the rate needs
+  reports failure, since that can come after the ISP half has landed. If the
+  running mode cannot be read before the import, or confirmed afterwards,
+  the load fails: a live `isp.sensorBin` set is refused and not saved, and
+  the log says to restart the pipeline. The ISP's own copy of the rate needs
   a real change to be rewritten, so when the rate moved the restore steps 0.01 fps
   lower (still inside the running mode) for a few frames first; without that, the ISP asked the sensor for the `.bin`'s rate
   on every frame (~90 refused requests and log lines a second). Measured on a

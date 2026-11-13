@@ -182,15 +182,21 @@ static int pq_pub_mode_differs(const ot_isp_pub_attr *a, const ot_isp_pub_attr *
  * 30, and the link carried garbage -- CRC/ECC storms in /proc/umap/mipi_rx,
  * one frame, no error anywhere.  The pipeline owns the mode; the .bin only
  * tunes it, so put the mode back.  Called whether or not the import
- * succeeded: the vendor call can fail after its ISP half has landed. */
-static void pq_keep_running_mode(const char *path, const ot_isp_pub_attr *before)
+ * succeeded: the vendor call can fail after its ISP half has landed.
+ * Returns -1 when the running mode is unknown or could not be restored. */
+static int pq_keep_running_mode(const char *path, const ot_isp_pub_attr *before)
 {
 	ot_isp_pub_attr after;
+	int rc = 0;
 
 	memset(&after, 0, sizeof(after));
-	if (ss_mpi_isp_get_pub_attr(PQ_VI_PIPE, &after) != TD_SUCCESS ||
-	    !pq_pub_mode_differs(before, &after))
-		return;
+	if (ss_mpi_isp_get_pub_attr(PQ_VI_PIPE, &after) != TD_SUCCESS) {
+		fprintf(stderr, "ERROR: %scannot read the ISP mode after %s\n",
+			PQ_LOG, path);
+		return -1;
+	}
+	if (!pq_pub_mode_differs(before, &after))
+		return 0;
 
 	fprintf(stderr, "WARNING: %s%s changed the ISP mode (%.2f fps, window "
 		"%ux%u, sensor mode %u, bayer %d); keeping the running %.2f fps, "
@@ -210,15 +216,20 @@ static void pq_keep_running_mode(const char *path, const ot_isp_pub_attr *before
 		ot_isp_pub_attr nudge = *before;
 
 		nudge.frame_rate = before->frame_rate - 0.01f;
-		if (ss_mpi_isp_set_pub_attr(PQ_VI_PIPE, &nudge) != TD_SUCCESS)
-			fprintf(stderr, "WARNING: %sframe-rate step before the restore "
+		if (ss_mpi_isp_set_pub_attr(PQ_VI_PIPE, &nudge) != TD_SUCCESS) {
+			fprintf(stderr, "ERROR: %sframe-rate step before the restore "
 				"failed; the ISP may keep asking for %.2f fps\n", PQ_LOG,
 				after.frame_rate);
+			rc = -1;
+		}
 		usleep(200 * 1000);
 	}
-	if (ss_mpi_isp_set_pub_attr(PQ_VI_PIPE, before) != TD_SUCCESS)
+	if (ss_mpi_isp_set_pub_attr(PQ_VI_PIPE, before) != TD_SUCCESS) {
 		fprintf(stderr, "ERROR: %scannot restore the ISP mode after %s\n",
 			PQ_LOG, path);
+		rc = -1;
+	}
+	return rc;
 }
 
 /* Both transfers refuse to run unless the ISP reports a tuning connection --
@@ -293,7 +304,7 @@ int cv610_pq_bin_import(const char *path)
 	PqBinLib lib;
 	unsigned char *buf;
 	ot_isp_pub_attr pub_before;
-	int have_pub;
+	int mode_rc;
 	td_s32 saved;
 	size_t len = 0;
 	int ret;
@@ -372,6 +383,16 @@ int cv610_pq_bin_import(const char *path)
 			"section needs %u -- importing the ISP half only\n", PQ_LOG, path,
 			remainder, nrx_len);
 
+	/* Without the running mode in hand, an import that changes it could not
+	 * be undone -- so do not import at all. */
+	memset(&pub_before, 0, sizeof(pub_before));
+	if (ss_mpi_isp_get_pub_attr(PQ_VI_PIPE, &pub_before) != TD_SUCCESS) {
+		fprintf(stderr, "WARNING: %scannot read the ISP mode; %s not applied\n",
+			PQ_LOG, path);
+		free(buf);
+		pq_lib_close(&lib);
+		return -1;
+	}
 	if (pq_tuning_begin(&saved) != 0) {
 		free(buf);
 		pq_lib_close(&lib);
@@ -379,13 +400,9 @@ int cv610_pq_bin_import(const char *path)
 	}
 	printf("> %sloading %s (%u B ISP + %u B 3DNR)\n", PQ_LOG, path, isp_len,
 		mod.nr_enable ? nrx_len : 0);
-	memset(&pub_before, 0, sizeof(pub_before));
-	have_pub = ss_mpi_isp_get_pub_attr(PQ_VI_PIPE, &pub_before) == TD_SUCCESS;
 	ret = ((pq_transfer_fn)lib.import_bin)(&mod, buf, (unsigned int)len);
 	pq_tuning_end(saved);
-
-	if (have_pub)
-		pq_keep_running_mode(path, &pub_before);
+	mode_rc = pq_keep_running_mode(path, &pub_before);
 
 	free(buf);
 	pq_lib_close(&lib);
@@ -393,7 +410,15 @@ int cv610_pq_bin_import(const char *path)
 	if (ret != 0) {
 		fprintf(stderr, "ERROR: %sOT_PQ_BIN_ImportBinData failed 0x%x for %s\n",
 			PQ_LOG, (unsigned)ret, path);
-		return -1;
+		return CV610_PQ_BIN_FAILED_AFTER_IMPORT;
+	}
+	/* The tuning landed but the pipeline's mode may not be in force: report
+	 * it, so a live isp.sensorBin set is refused (not committed or saved)
+	 * and the operator restarts the pipeline. */
+	if (mode_rc != 0) {
+		fprintf(stderr, "ERROR: %s%s applied, but the ISP mode could not be "
+			"confirmed as the pipeline's; restart the pipeline\n", PQ_LOG, path);
+		return CV610_PQ_BIN_FAILED_AFTER_IMPORT;
 	}
 	/* The image carried an AE ext-register record, so the ceilings latched
 	 * from the pre-import ISP are stale.  Invalidating them is the CALLER's

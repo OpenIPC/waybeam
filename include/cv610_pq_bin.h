@@ -30,9 +30,14 @@
  *  rather than to gate the calls. */
 int cv610_pq_bin_available(void);
 
+/** A failure that came after the vendor import ran, so its image may have
+ *  landed (the import itself failed, or the ISP mode was not restored). */
+#define CV610_PQ_BIN_FAILED_AFTER_IMPORT (-2)
+
 /** Import a PQTools `.bin` into the running ISP.
  *  An empty or NULL path is a no-op and succeeds, so an unset config field
- *  costs nothing.  Returns 0 on success, -1 on any failure. */
+ *  costs nothing.  Returns 0 on success, -1 on a failure before the ISP was
+ *  touched, CV610_PQ_BIN_FAILED_AFTER_IMPORT on one after it may have been. */
 int cv610_pq_bin_import(const char *path);
 
 /** Export the live ISP state to a `.bin` at `path`, overwriting it.
