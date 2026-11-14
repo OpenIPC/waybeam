@@ -1509,12 +1509,11 @@ static int cv610_apply_isp_bin(const char *path)
 	if (!g_cv610_runner)
 		return -1;
 	rc = cv610_pq_bin_import(path);
-	/* A .bin carries an AE ext-register record, so an import makes the
-	 * latched ceilings stale: without this, a later isp.gainMax=0 would write
-	 * the PRE-import value back over the imported one.  Also dropped when the
-	 * failure came after the vendor call, which may have landed the image --
-	 * but not on an early refusal: the ISP is untouched then, and re-latching
-	 * from it would take a live isp.gainMax override for the default. */
+	/* Drop the AE ceilings the import made stale (see
+	 * cv610_iq_forget_ae_defaults()), also when the failure came after the
+	 * vendor call, which may have landed the image -- but not on an early
+	 * refusal: the ISP is untouched then, and re-latching from it would take
+	 * a live isp.gainMax override for the default. */
 	if (rc == 0 || rc == CV610_PQ_BIN_FAILED_AFTER_IMPORT)
 		cv610_iq_forget_ae_defaults(&g_cv610_runner->ae_defaults);
 	return rc < 0 ? -1 : 0;

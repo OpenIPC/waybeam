@@ -58,10 +58,10 @@ flowing() {
 }
 
 # The encoded size venc actually chose, straight from its own bring-up line:
-#   "ok  VPSS 1920x1080 -> 1280x720 (scaled)"
+#   "ok  VPSS -> 1280x720" (0.86.4 and earlier: "ok  VPSS 1920x1080 -> 1280x720 (scaled)")
 # This, not the config, is what decides out_blk and the pool count.
 out_size() {
-	sed -n 's/.*VPSS [0-9]*x[0-9]* -> \([0-9]*x[0-9]*\).*/\1/p' "$LOG" | tail -1
+	sed -n 's/.*VPSS .*-> \([0-9]*x[0-9]*\).*/\1/p' "$LOG" | tail -1
 }
 
 # video0.size is a STRING ("1920x1080"), and video0.width/height do not exist --

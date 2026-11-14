@@ -258,11 +258,7 @@ static int sys_setup(const Cv610PipelineRuntimeConfig *c)
 	/* VI -> ISP -> VPSS all online: neither the RAW capture nor a full-size
 	 * YUV frame lands in VB, only VPSS's output does (VENC and the snapshot
 	 * channel read it) -- the vendor's own CV610 sample gives this mode no
-	 * RAW and no YUV blocks.  The VI-online/VPSS-offline graph this replaces
-	 * also held 4 RAW frames that nothing touched (min_free == blk_cnt in
-	 * /proc/umap/vb) and 4 capture-size YUV frames: ~67 MiB at 2592x1944;
-	 * at 1:1 1080p, where the output pool takes the YUV pool's place, the
-	 * RAW pool alone (~16 MB). */
+	 * RAW and no YUV blocks. */
 	memset(&vb, 0, sizeof(vb));
 	vb.max_pool_cnt = 1;
 	vb.common_pool[0].blk_size =
@@ -738,15 +734,8 @@ static int vpss_setup(const Cv610PipelineRuntimeConfig *c)
 	dst.dev_id = VPSS_GRP;
 	dst.chn_id = 0;
 	CV610_CHECK(ss_mpi_sys_bind(&src, &dst));
-	/* VPSS's input is VI's output: the capture, or its aspect crop. */
-	{
-		PipelinePrecropRect in = cv610_aspect_crop(c);
-
-		printf("  ok  VPSS %ux%u -> %ux%u%s\n", (unsigned)in.w,
-			(unsigned)in.h, c->out_width, c->out_height,
-			(c->out_width == in.w && c->out_height == in.h) ?
-				" (1:1)" : " (scaled)");
-	}
+	/* Its input is VI's output, logged with the aspect crop in vi_start_chn(). */
+	printf("  ok  VPSS -> %ux%u\n", c->out_width, c->out_height);
 	return 0;
 }
 

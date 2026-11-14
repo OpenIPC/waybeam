@@ -420,10 +420,8 @@ int cv610_pq_bin_import(const char *path)
 			"confirmed as the pipeline's; restart the pipeline\n", PQ_LOG, path);
 		return CV610_PQ_BIN_FAILED_AFTER_IMPORT;
 	}
-	/* The image carried an AE ext-register record, so the ceilings latched
-	 * from the pre-import ISP are stale.  Invalidating them is the CALLER's
-	 * job: it owns that cache, and this module has no business reaching into
-	 * a sibling's state to do it. */
+	/* The caller owns the AE ceilings this made stale and drops them
+	 * (cv610_iq_forget_ae_defaults()). */
 	printf("> %sISP tuning applied from %s\n", PQ_LOG, path);
 	return 0;
 }
