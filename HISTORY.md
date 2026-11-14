@@ -1,5 +1,17 @@
 # History
 
+## [0.86.5] - 2026-11-14
+
+CV610 clean-up after 0.86.2-0.86.4; no behaviour change.
+
+- The VPSS start-up line no longer recomputes the aspect crop to print its
+  input size; it logs the output size, and the crop keeps its own line.
+- The reason a `.bin` import drops the cached AE ceilings is explained once,
+  at `cv610_iq_forget_ae_defaults()`, instead of in three places.
+- Shorter `sys_setup()` VB comment (the history it repeated is in 0.86.3).
+- `scripts/cv610_reload_free_verify.sh` reads the output size from either form
+  of the VPSS line.
+
 ## [0.86.4] - 2026-11-13
 
 A CV610 tuning `.bin` no longer changes the sensor mode underneath the
