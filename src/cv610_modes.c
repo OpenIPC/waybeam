@@ -182,7 +182,9 @@ const char *cv610_mode_check_output(const Cv610SensorMode *mode,
 	if (width < CV610_OUT_MIN || height < CV610_OUT_MIN)
 		return "CV610 video0.size must be at least 128x128";
 	if (width > mode->width || height > mode->height)
-		return "CV610 video0.size cannot exceed the sensor mode's capture size";
+		return "CV610 video0.size exceeds the sensor mode's capture size; "
+			"lower video0.size, or select a larger mode (sensor.mode, "
+			"or video0.fps when the mode is automatic)";
 	return NULL;
 }
 

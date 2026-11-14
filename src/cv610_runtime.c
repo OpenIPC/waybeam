@@ -2324,9 +2324,6 @@ static int cv610_prepare(void *opaque)
 	ctx->pipeline.flip = cfg->image.flip ? 1 : 0;
 	ctx->pipeline.raw_bit = (int)mode->raw_bit;
 	ctx->pipeline.sensor_clock_hz = mode->sensor_clock_hz;
-	/* Match the standalone streamer's production graph. The CV610 module
-	 * loader now provides the clean SYS/VB lifecycle required by online VI. */
-	ctx->pipeline.vi_online = 1;
 	ctx->pipeline.i2c_bus = 0;
 	ctx->socket_handle = -1;
 	ctx->live_bitrate = cfg->video0.bitrate;

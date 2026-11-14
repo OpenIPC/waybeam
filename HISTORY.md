@@ -1,5 +1,36 @@
 # History
 
+## [0.86.3] - 2026-11-13
+
+CV610 stops allocating frames nothing reads: VI, ISP and VPSS now run online.
+
+- **VB holds only VPSS's output.** VI already ran online into the ISP, so the
+  RAW pool (4 capture-size frames at 2 bytes/pixel) was never touched
+  (`min_free == blk_cnt` in `/proc/umap/vb`), and VPSS offline made the ISP
+  write a full-size YUV frame for VPSS to read back. VPSS now runs online too,
+  as in the vendor's own CV610 sample, and VB is one pool of 4 output-size
+  frames. Measured on a Hi3516CV610 + IMX662, MMZ in use: 36.9 → 21.0 MiB at
+  1080p30, 38.3 → 10.4 MiB at 720p100 and 44.1 → 16.3 MiB at 1440x1080@100,
+  each at its nominal rate with 0 RTP loss (29.98, 100.02 and 99.99 fps;
+  1080p100 100.01). On a Hi3516CV610 + IMX335 (DmtryJS, `hisi_mem` 96 MiB
+  zone) at 1080p output: 89.6 → 22.2 MiB for 2592x1944 (modes 0 and 3),
+  74.5 → 21.7 MiB for 2592x1520, 36.8 → 20.9 MiB for 1080p90, and the binned
+  row at 720p 27.0 → 10.0 MiB, all five at their nominal rate. 5 MP output
+  (`video0.size=2592x1944`), which used to get the daemon OOM-killed, now
+  runs at 30 fps in 49.3 MiB.
+- **The aspect crop moves to the VI pipe's post-ISP crop.** With VPSS online
+  the group crop is refused outright (`0xa0078007`) and the channel crop is
+  applied short (1440 wide at x=240 came out 1200 wide, so VENC dropped every
+  frame); the VI channel crop is `NOT_SUPPORT` on this chip. The crop is an
+  internal rectangle VPSS scales to `video0.size`, the ISP still meters the
+  whole capture, and a 1440x1080 snapshot is centre-cropped, not squashed.
+  The VI post-crop needs a 4-pixel grid (1280x728 asked for a 1898-wide crop
+  and was refused, "crop width should be 4 align"), so the crop is rounded to
+  it on CV610 only; 1280x728@100 then ran at 100.03 fps.
+- The VI-offline graph is gone: it was unreachable (`vi_online` was always 1)
+  and would have needed the VI channel resized for the new crop. The VPSS
+  log line now reports VPSS's real input.
+
 ## [0.86.2] - 2026-11-12
 
 The CV610 module loader takes its MMZ zone from the kernel that laid it out,
