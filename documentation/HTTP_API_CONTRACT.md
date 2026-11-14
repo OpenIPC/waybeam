@@ -108,7 +108,7 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.86.3",
+    "app_version": "0.86.4",
     "contract_version": "0.32.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
@@ -930,6 +930,13 @@ section — so it can be fed back through `isp.sensorBin`.
 The payload is integrity-checked by the vendor library: a `.bin` cannot be
 edited or spliced in place (one flipped byte returns `0xcb000005`). Produce
 files with PQTools or with this endpoint, and treat them as opaque.
+
+A `.bin` also carries the ISP frame rate and window of the mode it was
+captured in. On CV610 the import keeps the running ones (from 0.86.4): a tune
+captured at another rate still applies its tuning, the running sensor mode's
+rate and capture window stay in force, and a warning names both. Before,
+a 100 fps tune under a 1080p30 pipeline switched the sensor mode underneath
+it and the stream stopped.
 
 ```bash
 curl http://<device-ip>/api/v1/iq/export_bin

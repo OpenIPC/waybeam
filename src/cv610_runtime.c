@@ -1509,12 +1509,15 @@ static int cv610_apply_isp_bin(const char *path)
 	if (!g_cv610_runner)
 		return -1;
 	rc = cv610_pq_bin_import(path);
-	/* A .bin carries an AE ext-register record, so a successful import makes
-	 * the latched ceilings stale: without this, a later isp.gainMax=0 would
-	 * write the PRE-import value back over the imported one. */
-	if (rc == 0)
+	/* A .bin carries an AE ext-register record, so an import makes the
+	 * latched ceilings stale: without this, a later isp.gainMax=0 would write
+	 * the PRE-import value back over the imported one.  Also dropped when the
+	 * failure came after the vendor call, which may have landed the image --
+	 * but not on an early refusal: the ISP is untouched then, and re-latching
+	 * from it would take a live isp.gainMax override for the default. */
+	if (rc == 0 || rc == CV610_PQ_BIN_FAILED_AFTER_IMPORT)
 		cv610_iq_forget_ae_defaults(&g_cv610_runner->ae_defaults);
-	return rc;
+	return rc < 0 ? -1 : 0;
 }
 
 static const VencApplyCallbacks g_cv610_apply_callbacks = {

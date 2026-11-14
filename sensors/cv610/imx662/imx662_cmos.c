@@ -156,8 +156,15 @@ static td_void cmos_fps_set(ot_vi_pipe vi_pipe, td_float fps, ot_isp_ae_sensor_d
 	td_u32   vmax;
 
 	sns_check_pointer_void_return(ae_sns_dft);
+	/* This only stretches the running mode's frame (VMAX), so it can slow a
+	 * mode down but never reach another one: 100 fps is its own mode, with
+	 * another INCK, bit depth and MIPI timing, and getting there takes a
+	 * pipeline restart (cmos_set_image_mode()), not this call. */
 	if (fps > max_fps || fps < g_imx662_mode_tbl[sns_state->img_mode].min_fps) {
-		isp_err_trace("Unsupported IMX662 fps: %f\n", fps);
+		isp_err_trace("IMX662 %.2f fps is outside the running %s mode's "
+			"%.0f-%.0f fps; another mode needs a pipeline restart\n", fps,
+			g_imx662_mode_tbl[sns_state->img_mode].mode_name,
+			g_imx662_mode_tbl[sns_state->img_mode].min_fps, max_fps);
 		return;
 	}
 	vmax = (td_u32)((td_float)IMX662_VMAX_1080P30_LINEAR * max_fps / fps);
