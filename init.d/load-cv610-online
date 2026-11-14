@@ -6,14 +6,82 @@ set -u
 
 MODULE_DIR=${MODULE_DIR:-/lib/modules/$(uname -r)/hisilicon}
 ARTIFACT_DIR=${ARTIFACT_DIR:-/usr/lib/cv610}
-MMZ_START=${CV610_MMZ_START:-0x44000000}
-MMZ_SIZE=${CV610_MMZ_SIZE:-64M}
+# The MMZ zone open_mmz is handed, and which allocator provides it. A
+# hi3516cv6xx kernel with hisi_mem (OpenIPC/firmware #2638, October 2026, and
+# later) measures DRAM, lays memory out itself and publishes the result under
+# /sys/module/hisi_mem/parameters, ignoring mem= and the u-boot env's
+# totalmem/osmem ("64M of memory from the bootloader ignored, DRAM is 128M");
+# both are read from there, the way OpenIPC's own load_hisilicon does.
+# Without hisi_mem the zone is a bootloader carve-out, taken from the
+# command line or from CV610_MMZ_START/SIZE below.
+#
+# This is not cosmetic. With hisi_mem present the zone lies INSIDE kernel
+# memory, so mmz_allocator=ot -- MMZ's own carve-out, which is what a
+# bootloader-driven layout needs -- is rejected outright and the boot comes up
+# with no MPP modules at all:
+#   Conflict MMZ: PHYS(0x42000000, 0x47FFFFFF), nBYTES=98304KB
+#   MMZ conflict to kernel memory (0x40000000, 0x47FFFFFF)
+#   Add MMZ failed ... load mmz failed!
+# Both paths can be overridden from the environment so the zone choice can be
+# tried without the kernel it describes: point HISI_MEM_PARAMS at a directory
+# holding `allocator` and `mmz` files, CV610_CMDLINE at a fake command line.
+# Test hooks only -- the platform conf does not set them.
+HISI_MEM_PARAMS=${HISI_MEM_PARAMS:-/sys/module/hisi_mem/parameters}
+CV610_CMDLINE=${CV610_CMDLINE:-/proc/cmdline}
+MMZ_ALLOCATOR=ot
+MMZ_ZONE=anonymous,0,${CV610_MMZ_START:-0x44000000},${CV610_MMZ_SIZE:-64M}
+
+# The platform conf offers START/SIZE as the way to move the zone, so when
+# something else owns it -- the kernel's own layout, or a mmz= carve-out named
+# on the command line -- warn instead of swallowing what an operator set.
+warn_mmz_ignored()
+{
+	echo "warning: $1; CV610_MMZ_START/SIZE ignored, open_mmz gets $MMZ_ZONE" >&2
+}
+
+hm_alloc=$(cat "$HISI_MEM_PARAMS/allocator" 2>/dev/null)
+hm_mmz=$(cat "$HISI_MEM_PARAMS/mmz" 2>/dev/null)
+# Gated on the allocator alone, as load_hisilicon does: a kernel that
+# publishes one has laid memory out itself, so falling back to ot would only
+# trade an empty mmz= for the MMZ conflict above.
+if [ -n "$hm_alloc" ]; then
+	MMZ_ALLOCATOR=$hm_alloc
+	# Possibly empty: start_modules refuses then, since the bootloader zone
+	# is no fallback here -- it lies inside the kernel's memory.
+	MMZ_ZONE=$hm_mmz
+	# The kernel has reserved the range already: CV610_MMZ_START/SIZE cannot
+	# move it; OpenIPC's set_allocator plus a reboot can.
+	if [ -n "$hm_mmz" ] && [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
+		warn_mmz_ignored "the kernel laid memory out itself"
+	fi
+else
+	# No hisi_mem: the zone is a bootloader carve-out. The first mmz= on the
+	# kernel command line wins over CV610_MMZ_START/SIZE, and CMA provides that
+	# zone rather than MMZ's own allocator.
+	cmdmz=$(awk -F= '$1 == "mmz" {print $2; exit}' RS=' ' "$CV610_CMDLINE")
+	if [ -n "${cmdmz:-}" ]; then
+		MMZ_ALLOCATOR=cma
+		MMZ_ZONE=$cmdmz
+		if [ -n "${CV610_MMZ_START:-}${CV610_MMZ_SIZE:-}" ]; then
+			warn_mmz_ignored "the command line names the carve-out"
+		fi
+	fi
+fi
 # Clock profile for the initial insmod; the daemon retunes it per mode.
 SENSOR_PROFILE=${CV610_SENSOR_PROFILE:-imx662}
 # Analog microphone on the inner ACODEC. Off by default so the hardware-verified
 # video-only module set stays the default boot path.
 AUDIO=${CV610_AUDIO:-0}
 loaded=""
+
+# Checked before anything is unloaded or loaded, so a refused start or restart
+# leaves the board exactly as it was.
+require_zone()
+{
+	[ -n "$MMZ_ZONE" ] && return 0
+	echo "hisi_mem publishes an allocator but no mmz zone; not loading" >&2
+	return 1
+}
 
 is_loaded()
 {
@@ -123,6 +191,7 @@ start_modules()
 		echo "refusing dirty MPP module state" >&2
 		return 1
 	}
+	require_zone || return 1
 
 	trap cleanup_partial EXIT HUP INT TERM
 	echo "load patched open_sys_config"
@@ -131,8 +200,8 @@ start_modules()
 		board=dmeb_qfn ir_auto=0 || return 1
 	loaded="open_sys_config $loaded"
 	load_stock open_osal proc_show=1 || return 1
-	load_stock open_mmz anony=1 mmz_allocator=ot \
-		mmz=anonymous,0,"$MMZ_START","$MMZ_SIZE" mem_process_isolation=0 || return 1
+	load_stock open_mmz anony=1 mmz_allocator="$MMZ_ALLOCATOR" \
+		mmz="$MMZ_ZONE" mem_process_isolation=0 || return 1
 	load_stock open_base logmpp_show=1 || return 1
 
 	echo "load registration-only PM shim"
@@ -225,7 +294,7 @@ case "${1:-}" in
 	start) start_modules ;;
 	stop) stop_modules ;;
 	restart)
-		stop_modules && start_modules
+		require_zone && stop_modules && start_modules
 		;;
 	holders)
 		# Callers that must decide *before* destroying state ask here, passing

@@ -1,5 +1,40 @@
 # History
 
+## [0.86.2] - 2026-11-12
+
+The CV610 module loader takes its MMZ zone from the kernel that laid it out,
+instead of naming one from the bootloader's side.
+
+- **Fixed: `load-cv610-online` loaded no modules at all on an OpenIPC CV610
+  image whose kernel has `hisi_mem`** (OpenIPC/firmware #2638, October 2026,
+  and later). It passed `mmz_allocator=ot`, which is right only against a
+  bootloader-driven layout: such a kernel measures DRAM and
+  reserves the zone inside kernel memory through CMA, so `open_mmz` refused
+  it (`Conflict MMZ: PHYS(0x42000000, 0x47FFFFFF)` / `MMZ conflict to kernel
+  memory (0x40000000, 0x47FFFFFF)`), `load mmz failed!` ended the sequence,
+  and the craft came up with no MPP modules -- a boot waybeam cannot start
+  on. The loader now reads the allocator and the zone from
+  `/sys/module/hisi_mem/parameters/{allocator,mmz}` when the kernel publishes
+  them, the same source OpenIPC's own `load_hisilicon` uses, and keeps `ot`
+  (or `cma`, for a `mmz=` carve-out) on a boot without `hisi_mem`.
+  `CV610_MMZ_START`/`CV610_MMZ_SIZE` apply only in that second case, and
+  only when the command line does not name the carve-out with `mmz=`; the
+  loader says which of the two overrode them. If `hisi_mem` publishes an
+  allocator but no zone, `start` and `restart` refuse with an error and
+  exit 1 before touching any module: the bootloader zone is no fallback on
+  such a kernel.
+- **Measured, not estimated: the 2592x1944 IMX335 rows take 94 MiB of MMZ**
+  at 1080p output, against 81 MiB for 2592x1520, 44 MiB for 1080p and 34 MiB
+  for the binned row, with 0.86.1's VB pool sizing. On a `hisi_mem` kernel
+  `mem=` and the u-boot env's `totalmem`/`osmem` are ignored, so the docs and
+  the platform conf now point at OpenIPC's `set_allocator` plus a reboot to
+  move the split; without `hisi_mem` the zone still grows only with a smaller
+  `mem=` and `CV610_MMZ_START`/`CV610_MMZ_SIZE` moved with it.
+- **Hardware:** the loader and `drivers/cv610` were run on a Hi3516CV610 +
+  IMX335 board. All five modes come up, the daemon's `sns0_clk_hz` write takes
+  (`37125000 -> CRG 0x8440 = 0x8010`), and every row delivers its nominal
+  rate at 1080p output: 30.1, 40.2, 60.1, 30.1 and 90.2 fps.
+
 ## [0.86.1] - 2026-11-11
 
 The kernel half of the CV610 sensor chain now lives here too, so 1080p100 is
