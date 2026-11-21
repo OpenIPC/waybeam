@@ -2093,7 +2093,7 @@ static int pCus_GetAEMinMaxUSecs(ms_cus_sensor* handle, u32* min, u32* max)
 {
     u32 cur = handle->video_res_supported.ulcur_res;
     *min = 1;
-    *max = 1000000 / imx415_mipi_linear[cur].senout.max_fps;
+    *max = 1000000 / imx415_mipi_linear[cur].senout.min_fps;
     return SUCCESS;
 }
 
@@ -2107,7 +2107,7 @@ static int pCus_GetAEMinMaxGain(ms_cus_sensor* handle, u32* min, u32* max)
 static int IMX415_GetShutterInfo(struct __ms_cus_sensor* handle, CUS_SHUTTER_INFO* info)
 {
     u32 cur = handle->video_res_supported.ulcur_res;
-    info->max = 1000000000 / imx415_mipi_linear[cur].senout.max_fps;
+    info->max = 1000000000 / imx415_mipi_linear[cur].senout.min_fps;
     info->min = (Preview_line_period * 1);
     info->step = Preview_line_period;
     return SUCCESS;
