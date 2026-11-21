@@ -26,8 +26,6 @@ static void write_be16(uint8_t *p, uint16_t v)
 
 int venc_fec_set(VencFec *fec, int on)
 {
-	if (!fec)
-		return -1;
 	if (on && !fec->arena) {
 		fec->arena = malloc((size_t)VENC_FEC_MAX_SRC * VENC_FEC_SYM_MAX);
 		if (!fec->arena)
@@ -58,8 +56,6 @@ void venc_fec_capture(VencFec *fec, const uint8_t *header,
 	const size_t len = payload1_len + payload2_len;
 	uint8_t *sym;
 
-	if (!fec->frame)
-		return;
 	if (fec->frame != 1 || fec->count >= VENC_FEC_MAX_SRC ||
 	    len > VENC_FEC_MAX_PAYLOAD_BYTES) {
 		fec->frame = 2;

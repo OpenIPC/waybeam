@@ -36,7 +36,8 @@ typedef struct {
 int venc_fec_set(VencFec *fec, int on);
 void venc_fec_begin_frame(VencFec *fec);
 /* Keep a video packet that went out (or was counted as dropped) with its
- * sequence number used: source i must be seq base_seq + i. */
+ * sequence number used: source i must be seq base_seq + i.  Call only while
+ * fec->frame is set. */
 void venc_fec_capture(VencFec *fec, const uint8_t *header,
 	const uint8_t *payload1, size_t payload1_len,
 	const uint8_t *payload2, size_t payload2_len);

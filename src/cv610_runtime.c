@@ -304,12 +304,9 @@ static int cv610_apply_bitrate(uint32_t kbps)
 	return ret;
 }
 
-/* Live outgoing.fec.  video0.bitrate is the wire total, so a toggle
- * re-splits it; parity starts or stops at the next frame.  Rate first when
- * turning on, flag first when turning off, so no frame carries parity on
- * top of the full video rate (Star6E's order).  Config validation holds it
- * to a udp:// / unix:// RTP server, which a live server change cannot
- * leave without a respawn. */
+/* Live outgoing.fec, in Star6E's order (apply_fec in star6e_controls.c).
+ * Validation holds it to a udp:// / unix:// server; a frame-shm ring is
+ * only still here while a respawn is pending. */
 static int cv610_apply_fec(bool on)
 {
 	Cv610RunnerContext *ctx = g_cv610_runner;
@@ -1708,7 +1705,7 @@ static int cv610_video_write(const uint8_t *header, size_t header_len,
 	const int ret = cv610_output_write(header, header_len, payload1,
 		payload1_len, payload2, payload2_len, opaque);
 
-	if (ret == 0)
+	if (ret == 0 && ctx->fec.frame)
 		venc_fec_capture(&ctx->fec, header, payload1, payload1_len,
 			payload2, payload2_len);
 	return ret;
@@ -1760,12 +1757,7 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 			slice_bytes += (uint32_t)nal_len;
 		}
 	}
-	if (slices) { /* EWMA 1/8: follows the scene, not one frame */
-		const uint32_t mean = slice_bytes / slices;
-
-		ctx->slice_avg = ctx->slice_avg ?
-			(ctx->slice_avg * 7 + mean) / 8 : mean;
-	}
+	ctx->slice_avg = venc_fec_slice_avg(ctx->slice_avg, slices, slice_bytes);
 	__atomic_store_n(&ctx->payload_used, max_payload, __ATOMIC_RELAXED);
 	/* Parity after the video, and none for a frame that lost a packet
 	 * (an EAGAIN drop or a hard failure): the queue is already full, and

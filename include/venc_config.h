@@ -45,6 +45,16 @@ static inline uint32_t venc_fec_video_kbps(int fec, uint32_t total_kbps)
  * (a block's parity symbol is its longest packet, so a whole large slice
  * buys fewer parity packets).  maxPayloadSize stays the ceiling the link
  * carries; the floor is 1400, today's size, or the ceiling if lower. */
+/* The slice size the payload follows: an EWMA of 1/8 over frames of the
+ * mean non-IRAP slice, so it follows the scene, not one frame. */
+static inline uint32_t venc_fec_slice_avg(uint32_t avg, uint32_t slices,
+	uint32_t bytes)
+{
+	if (!slices)
+		return avg;
+	return avg ? (avg * 7 + bytes / slices) / 8 : bytes / slices;
+}
+
 static inline uint16_t venc_fec_payload_size(uint16_t ceiling,
 	uint32_t slice_avg)
 {

@@ -2307,6 +2307,12 @@ static int test_outgoing_fec_validation(void)
 		venc_fec_payload_size(3780, 4694) == 3780);
 	CHECK("fec payload: never above a low ceiling",
 		venc_fec_payload_size(1200, 2000) == 1200);
+	CHECK("fec slice avg: first frame seeds it",
+		venc_fec_slice_avg(0, 4, 4000) == 1000);
+	CHECK("fec slice avg: 1/8 towards the new mean",
+		venc_fec_slice_avg(1000, 2, 4000) == 1125);
+	CHECK("fec slice avg: no slices keeps it",
+		venc_fec_slice_avg(1000, 0, 0) == 1000);
 	return failures;
 }
 

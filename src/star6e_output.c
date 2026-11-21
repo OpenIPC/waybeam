@@ -937,8 +937,9 @@ int star6e_output_send_rtp_parts(Star6eOutput *output,
 		return -1;
 	/* After a successful send only: the packetizer advances seq only
 	 * then, so source i is always seq base_seq + i. */
-	venc_fec_capture(&output->fec, header, payload1, payload1_len,
-		payload2, payload2_len);
+	if (output->fec.frame)
+		venc_fec_capture(&output->fec, header, payload1, payload1_len,
+			payload2, payload2_len);
 	return 0;
 }
 
