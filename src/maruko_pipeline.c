@@ -2157,7 +2157,7 @@ static int maruko_start_venc(const MarukoBackendConfig *cfg,
 		gop = 1;
 	/* Same practical bitrate bounds as apply_bitrate() so a persisted
 	 * sub-floor bitrate can't birth the encoder collapsed at boot. */
-	uint32_t rate_kbps = cfg->venc_max_rate;
+	uint32_t rate_kbps = venc_fec_video_kbps(cfg->fec, cfg->venc_max_rate);
 	if (rate_kbps > VENC_BITRATE_MAX_KBPS)
 		rate_kbps = VENC_BITRATE_MAX_KBPS;
 	if (rate_kbps < VENC_BITRATE_MIN_KBPS)
@@ -2912,6 +2912,13 @@ static int bind_maruko_pipeline(MarukoBackendContext *ctx)
 				"starting with NO video output so the craft stays reachable "
 				"-- set outgoing.server over the API to recover\n");
 		}
+		/* RS parity on the udp:// / unix:// RTP batch, whether or not
+		 * the socket came up: the encoder already has its video share,
+		 * and a live server fix must find parity on.  Load validation
+		 * holds fec:true to such a server. */
+		if (ctx->cfg.fec && ctx->cfg.stream_mode == MARUKO_STREAM_RTP &&
+		    venc_fec_set(&ctx->output.fec, 1) != 0)
+			return -1;
 	}
 
 	/* After the init above, whose reset would clear it.  Same

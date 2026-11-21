@@ -2293,8 +2293,8 @@ static int test_outgoing_fec_validation(void)
 	}
 	CHECK("fec supported star6e",
 		venc_api_field_supported_for_backend("star6e", "outgoing.fec") == 1);
-	CHECK("fec unsupported maruko",
-		venc_api_field_supported_for_backend("maruko", "outgoing.fec") == 0);
+	CHECK("fec supported maruko",
+		venc_api_field_supported_for_backend("maruko", "outgoing.fec") == 1);
 	CHECK("fec supported cv610",
 		venc_api_field_supported_for_backend("cv610", "outgoing.fec") == 1);
 	CHECK("fec video share 8000 -> 6400", venc_fec_video_kbps(1, 8000) == 6400);
@@ -2327,11 +2327,11 @@ static int test_apply_fec(bool on)
 }
 
 /* outgoing.fec is live, and its rule runs on the whole staged request, so
- * the order of keys inside one request does not matter.  Star6E and CV610
- * send parity, and the rules are the same on both. */
+ * the order of keys inside one request does not matter.  Every backend
+ * sends parity, and the rules are the same on all of them. */
 static int test_outgoing_fec_live(void)
 {
-	static const char *const backends[] = { "star6e", "cv610" };
+	static const char *const backends[] = { "star6e", "cv610", "maruko" };
 	VencConfig cfg;
 	VencApplyCallbacks cb;
 	int failures = 0, status = 0;
@@ -2375,40 +2375,6 @@ static int test_outgoing_fec_live(void)
 			status == 501 && !cfg.outgoing.fec);
 		venc_api_clear_reinit();
 	}
-	return failures;
-}
-
-/* A backend without parity (Maruko) ignores outgoing.fec, so a stray
- * fec:true (a config copied from another camera) must not block its other
- * outgoing keys -- and the parity backends keep the rule (the test above). */
-static int test_outgoing_fec_stray_on_other_backends(void)
-{
-	static const char *const backends[] = { "maruko" };
-	VencConfig cfg;
-	VencApplyCallbacks cb;
-	int failures = 0, status = 0;
-	char response[1024];
-
-	memset(&cb, 0, sizeof(cb));
-	cb.apply_max_payload_size = test_apply_max_payload;
-	for (size_t i = 0; i < sizeof(backends) / sizeof(backends[0]); i++) {
-		venc_config_defaults(&cfg);
-		cfg.outgoing.fec = true;
-		CHECK("fec stray: other outgoing keys still apply",
-			apply_set_query_http(&cfg, backends[i], &cb,
-				"outgoing.maxPayloadSize=3781", &status, response,
-				sizeof(response)) == 0 && status == 200 &&
-			cfg.outgoing.max_payload_size == 3781);
-		venc_api_clear_reinit();
-	}
-	/* The load path names the build's backend, never the registered one:
-	 * the host build carries no other backend, so the rule still runs. */
-	venc_config_defaults(&cfg);
-	cfg.outgoing.fec = true;
-	snprintf(cfg.outgoing.server, sizeof(cfg.outgoing.server), "%s",
-		"frame-shm://x");
-	CHECK("fec stray: load path still checks on this build",
-		venc_api_validate_loaded_config(&cfg) != NULL);
 	return failures;
 }
 
@@ -2935,7 +2901,6 @@ int test_venc_api(void)
 	failures += test_field_support_by_backend();
 	failures += test_outgoing_fec_validation();
 	failures += test_outgoing_fec_live();
-	failures += test_outgoing_fec_stray_on_other_backends();
 	failures += test_cv610_restart_only_mutability();
 	failures += test_qr_window_live_config_only();
 	failures += test_multi_set_live_success();

@@ -306,12 +306,15 @@ static int maruko_rc_commit_intent(int require_bounds)
  * Maruko ever reaches a bench, the check is ten spaced video0.bitrate writes
  * against a count of IRAP access units (not /api/v1/idr/stats, which only
  * sees requests and is blind to an SDK-implicit keyframe). */
-static int maruko_apply_bitrate(uint32_t kbps)
+static int maruko_program_bitrate(uint32_t kbps, int fec)
 {
 	i6c_venc_chn attr = {0};
 	if (maruko_mi_venc_get_chn_attr(g_ctx.venc_dev,
 	    g_ctx.venc_chn, &attr) != 0)
 		return -1;
+	/* With RS parity on, kbps is the wire total and the encoder gets
+	 * its video share. */
+	kbps = venc_fec_video_kbps(fec, kbps);
 	if (kbps > VENC_BITRATE_MAX_KBPS)
 		kbps = VENC_BITRATE_MAX_KBPS;
 	if (kbps < VENC_BITRATE_MIN_KBPS)
@@ -336,6 +339,41 @@ static int maruko_apply_bitrate(uint32_t kbps)
 	if (maruko_mi_venc_set_chn_attr(g_ctx.venc_dev,
 	    g_ctx.venc_chn, &attr) != 0)
 		return -1;
+	return 0;
+}
+
+static MarukoOutput *g_maruko_output_ptr;
+
+static int maruko_apply_bitrate(uint32_t kbps)
+{
+	return maruko_program_bitrate(kbps, g_maruko_output_ptr &&
+		__atomic_load_n(&g_maruko_output_ptr->fec.on, __ATOMIC_RELAXED));
+}
+
+/* Star6E's apply_fec order: the encoder drops to its video share before
+ * parity starts, and returns to the total only after parity stopped, so
+ * the wire never carries more than video0.bitrate. */
+static int maruko_apply_fec(bool on)
+{
+	MarukoOutput *o = g_maruko_output_ptr;
+	uint32_t total;
+
+	if (!o || !g_ctx.vcfg)
+		return -1;
+	if (__atomic_load_n(&o->fec.on, __ATOMIC_RELAXED) == (int)on)
+		return 0;
+	total = g_ctx.vcfg->video0.bitrate;
+	if (on && maruko_program_bitrate(total, 1) != 0)
+		return -1;
+	if (maruko_output_set_fec(o, on) != 0) {
+		(void)maruko_program_bitrate(total, 0);
+		return -1;
+	}
+	if (!on && maruko_program_bitrate(total, 0) != 0) {
+		(void)maruko_output_set_fec(o, 1);
+		return -1;
+	}
+	fprintf(stderr, "> outgoing.fec %s (live)\n", on ? "on" : "off");
 	return 0;
 }
 
@@ -1390,7 +1428,6 @@ static int maruko_apply_output_enabled(bool on)
 
 /* ── Live server change (Step 3C) ────────────────────────────────────── */
 
-static MarukoOutput *g_maruko_output_ptr;
 static int maruko_apply_server(const char *uri)
 {
 	if (!g_maruko_output_ptr)
@@ -1557,6 +1594,9 @@ static char *maruko_query_transport_status(void)
 			"\"pressureDrops\":%u,"
 			"\"transportDrops\":%u,"
 			"\"packetsSent\":%u,"
+			"\"fecParityPkts\":%u,"
+			"\"fecUnprotected\":%u,"
+			"\"rtpPayload\":%u,"
 			"\"badAuDrops\":%llu}}",
 			transport,
 			(unsigned)fill_pct,
@@ -1565,6 +1605,12 @@ static char *maruko_query_transport_status(void)
 			(unsigned)__atomic_load_n(&backend->output.socket_drops,
 				__ATOMIC_RELAXED),
 			(unsigned)__atomic_load_n(&backend->output.socket_writes,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&backend->output.fec.parity_pkts,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&backend->output.fec.unprotected,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&backend->output.payload_used,
 				__ATOMIC_RELAXED),
 			(unsigned long long)__atomic_load_n(
 				&backend->output.bad_au_drops, __ATOMIC_RELAXED));
@@ -1698,6 +1744,7 @@ void maruko_controls_service_detect_reload(void)
 
 static const VencApplyCallbacks g_maruko_apply_cb = {
 	.apply_bitrate = maruko_apply_bitrate,
+	.apply_fec = maruko_apply_fec,
 	.apply_fps = maruko_apply_fps_live,
 	.apply_gop = maruko_apply_gop,
 	.apply_qp_delta = maruko_apply_qp_delta,

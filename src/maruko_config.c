@@ -88,6 +88,7 @@ int maruko_config_from_venc(const VencConfig *vcfg, MarukoBackendConfig *cfg)
 
 	cfg->max_frame_size = vcfg->outgoing.max_payload_size;
 	cfg->rtp_payload_size = vcfg->outgoing.max_payload_size;
+	cfg->fec = vcfg->outgoing.fec;
 	cfg->sidecar_port = vcfg->outgoing.sidecar_port;
 
 	if (vcfg->outgoing.server[0] &&
