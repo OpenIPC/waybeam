@@ -126,6 +126,7 @@ void venc_config_defaults(VencConfig *cfg)
 	cfg->outgoing.server[0] = '\0';
 	safe_strcpy(cfg->outgoing.stream_mode, sizeof(cfg->outgoing.stream_mode), "rtp");
 	cfg->outgoing.max_payload_size = 1400;
+	cfg->outgoing.fec = false;
 	cfg->outgoing.connected_udp = true;
 	cfg->outgoing.allow_unix_encoder_stall = false;
 
@@ -802,6 +803,7 @@ static void load_outgoing(const cJSON *root, VencConfigOutgoing *s)
 		json_get_string(obj, "streamMode", s->stream_mode));
 	s->max_payload_size = (uint16_t)json_get_int(obj, "maxPayloadSize",
 		(int)s->max_payload_size);
+	s->fec = json_get_bool(obj, "fec", s->fec);
 	s->connected_udp = json_get_bool(obj, "connectedUdp", s->connected_udp);
 	s->allow_unix_encoder_stall = json_get_bool(obj, "allowUnixEncoderStall",
 		s->allow_unix_encoder_stall);
@@ -1472,6 +1474,7 @@ static void render_outgoing(PrettyBuf *p, const VencConfig *cfg, int is_last)
 	pp_field_string(p, 2, "server",          cfg->outgoing.server,            0);
 	pp_field_string(p, 2, "streamMode",      cfg->outgoing.stream_mode,       0);
 	pp_field_uint(p,   2, "maxPayloadSize",  cfg->outgoing.max_payload_size,  0);
+	pp_field_bool(p,   2, "fec",             cfg->outgoing.fec,               0);
 	pp_field_bool(p,   2, "connectedUdp",    cfg->outgoing.connected_udp,     0);
 	pp_field_bool(p,   2, "allowUnixEncoderStall",
 		cfg->outgoing.allow_unix_encoder_stall, 0);
@@ -1737,6 +1740,7 @@ static cJSON *config_to_cjson(const VencConfig *cfg)
 		cJSON_AddStringToObject(out, "server", cfg->outgoing.server);
 		cJSON_AddStringToObject(out, "streamMode", cfg->outgoing.stream_mode);
 		cJSON_AddNumberToObject(out, "maxPayloadSize", cfg->outgoing.max_payload_size);
+		cJSON_AddBoolToObject(out, "fec", cfg->outgoing.fec);
 		cJSON_AddBoolToObject(out, "connectedUdp", cfg->outgoing.connected_udp);
 		cJSON_AddBoolToObject(out, "allowUnixEncoderStall",
 			cfg->outgoing.allow_unix_encoder_stall);

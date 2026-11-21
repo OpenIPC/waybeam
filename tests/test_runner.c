@@ -26,6 +26,7 @@ extern int test_rtp_session(void);
 extern int test_stream_metrics(void);
 extern int test_star6e_hevc_rtp(void);
 extern int test_star6e_output(void);
+extern int test_rs_fec(void);
 extern int test_star6e_audio(void);
 extern int test_star6e_video(void);
 extern int test_star6e_recorder(void);
@@ -116,6 +117,8 @@ int main(void)
 
 	printf("\n--- test_star6e_output ---\n");
 	failures += test_star6e_output();
+	printf("\n--- test_rs_fec ---\n");
+	failures += test_rs_fec();
 
 	printf("\n--- test_star6e_audio ---\n");
 	failures += test_star6e_audio();

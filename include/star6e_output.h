@@ -49,7 +49,16 @@ typedef struct {
 	int requested_connected_udp;
 	int allow_unix_encoder_stall;
 	int has_server;
+	int fec; /* outgoing.fec: RS parity after each frame (udp/unix RTP) */
 } Star6eOutputSetup;
+
+/* RS parity, protocols/venc-fec.md. */
+#define STAR6E_FEC_PT 100
+#define STAR6E_FEC_SSRC_XOR 0x52534643u
+#define STAR6E_FEC_MAX_SRC 256    /* source packets protected per frame */
+#define STAR6E_FEC_BLOCK_MAX 40   /* sources per block (encode-time cap) */
+#define STAR6E_FEC_SYM_MAX (2 + VENC_FEC_MAX_PAYLOAD_BYTES) /* length + payload */
+#define STAR6E_FEC_HDR 6
 
 /* Per-frame sendmmsg batch. We own `scratch[slot]` containing
  * [RTP header || payload1] concatenated — both the header (built on the
@@ -109,6 +118,20 @@ typedef struct {
 	uint32_t socket_drops;
 	uint32_t socket_writes;
 	Star6eOutputBatch batch;
+	/* RS parity state: this frame's source symbols and the parity stream's
+	 * own RTP state.  Producer thread only, except fec_on (set by
+	 * star6e_output_set_fec, latched into fec_frame at begin_frame) and the
+	 * two counters (atomic relaxed, read by the API). */
+	int fec_on;
+	int fec_frame;
+	uint8_t *fec_arena; /* allocated on first enable, kept until teardown */
+	uint16_t fec_count;
+	uint32_t fec_lost0; /* socket_drops + send_errors at begin_frame */
+	uint16_t fec_base_seq;
+	RtpPacketizerState fec_rtp;
+	int64_t fec_credit; /* parity bytes owed, x VENC_FEC_PARITY_DIV */
+	uint32_t fec_parity_pkts;
+	uint32_t fec_unprotected;
 	/* Window state for the reading above.  PER OUTPUT, not a file-static
 	 * singleton: a second frame-shm output (dual-stream ch1) is a second
 	 * ring with its own occupancy, and a shared tracker cannot represent
@@ -220,6 +243,11 @@ void star6e_output_reset(Star6eOutput *output);
 /** Create socket and connect to destination per setup config. */
 int star6e_output_init(Star6eOutput *output, const Star6eOutputSetup *setup);
 
+/* Live outgoing.fec (protocols/venc-fec.md).  The parity arena is
+ * allocated on the first enable and kept until teardown; the encode thread
+ * picks the flag up at the next begin_frame.  -1 when the output is not
+ * udp:// / unix:// RTP or the allocation fails. */
+int star6e_output_set_fec(Star6eOutput *output, int on);
 /** Check if active output uses RTP mode. */
 int star6e_output_is_rtp(const Star6eOutput *output);
 

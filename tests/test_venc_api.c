@@ -2257,6 +2257,100 @@ static int test_frame_gate_loaded_config_bounds(void)
 	return failures;
 }
 
+/* outgoing.fec rides the RTP socket path only and must fit 3800 B
+ * (protocols/venc-fec.md): every rule, plus the fec-off control. */
+static int test_outgoing_fec_validation(void)
+{
+	static const struct {
+		const char *name, *server, *mode;
+		uint16_t payload;
+		bool fec, ok;
+	} c[] = {
+		{ "fec off, shm, 4000 B (control)", "shm://x", "rtp", 4000, false, true },
+		{ "fec udp 1400", "udp://127.0.0.1:5600", "rtp", 1400, true, true },
+		{ "fec unix 1400", "unix://now-video", "rtp", 1400, true, true },
+		{ "fec no server", "", "rtp", 1400, true, true },
+		{ "fec 3780 B", "udp://127.0.0.1:5600", "rtp", 3780, true, true },
+		{ "fec 3781 B", "udp://127.0.0.1:5600", "rtp", 3781, true, false },
+		{ "fec shm", "shm://x", "rtp", 1400, true, false },
+		{ "fec frame-shm", "frame-shm://x", "rtp", 1400, true, false },
+		{ "fec compact", "udp://127.0.0.1:5600", "compact", 1400, true, false },
+	};
+	VencConfig cfg;
+	int failures = 0;
+	size_t i;
+
+	for (i = 0; i < sizeof(c) / sizeof(c[0]); i++) {
+		venc_config_defaults(&cfg);
+		snprintf(cfg.outgoing.server, sizeof(cfg.outgoing.server), "%s",
+			c[i].server);
+		snprintf(cfg.outgoing.stream_mode,
+			sizeof(cfg.outgoing.stream_mode), "%s", c[i].mode);
+		cfg.outgoing.max_payload_size = c[i].payload;
+		cfg.outgoing.fec = c[i].fec;
+		CHECK(c[i].name,
+			(venc_api_validate_loaded_config(&cfg) == NULL) == c[i].ok);
+	}
+	CHECK("fec supported star6e",
+		venc_api_field_supported_for_backend("star6e", "outgoing.fec") == 1);
+	CHECK("fec unsupported maruko",
+		venc_api_field_supported_for_backend("maruko", "outgoing.fec") == 0);
+	CHECK("fec unsupported cv610",
+		venc_api_field_supported_for_backend("cv610", "outgoing.fec") == 0);
+	CHECK("fec video share 8000 -> 6400", venc_fec_video_kbps(1, 8000) == 6400);
+	CHECK("fec off keeps the total", venc_fec_video_kbps(0, 8000) == 8000);
+	return failures;
+}
+
+static int g_fec_calls;
+static bool g_fec_last;
+
+static int test_apply_fec(bool on)
+{
+	g_fec_calls++;
+	g_fec_last = on;
+	return 0;
+}
+
+/* outgoing.fec is live, and its rule runs on the whole staged request, so
+ * the order of keys inside one request does not matter. */
+static int test_outgoing_fec_live(void)
+{
+	VencConfig cfg;
+	VencApplyCallbacks cb;
+	int failures = 0, status = 0;
+	char response[1024];
+
+	venc_config_defaults(&cfg);
+	cfg.outgoing.max_payload_size = 1500;
+	memset(&cb, 0, sizeof(cb));
+	cb.apply_max_payload_size = test_apply_max_payload;
+	cb.apply_fec = test_apply_fec;
+	g_fec_calls = 0;
+
+	CHECK("fec live: fec first, payload second, accepted",
+		apply_set_query_http(&cfg, "star6e", &cb,
+			"outgoing.fec=true&outgoing.maxPayloadSize=1400", &status,
+			response, sizeof(response)) == 0 && status == 200 &&
+		g_fec_calls == 1 && g_fec_last && cfg.outgoing.fec);
+	CHECK("fec live: payload past 3780 with fec on rejected",
+		apply_set_query_http(&cfg, "star6e", &cb,
+			"outgoing.maxPayloadSize=3781", &status, response,
+			sizeof(response)) == 0 && status == 409 &&
+		cfg.outgoing.max_payload_size == 1400);
+	CHECK("fec live: off",
+		apply_set_query_http(&cfg, "star6e", &cb, "outgoing.fec=false",
+			&status, response, sizeof(response)) == 0 &&
+		status == 200 && g_fec_calls == 2 && !g_fec_last &&
+		!cfg.outgoing.fec);
+	cb.apply_fec = NULL;
+	CHECK("fec live: no callback -> 501, unchanged",
+		apply_set_query_http(&cfg, "star6e", &cb, "outgoing.fec=true",
+			&status, response, sizeof(response)) == 0 &&
+		status == 501 && !cfg.outgoing.fec);
+	return failures;
+}
+
 static int test_resilience_preset_preserves_intra_refresh_qp(void)
 {
 	int failures = 0;
@@ -2778,6 +2872,8 @@ int test_venc_api(void)
 	failures += test_active_precrop_setter();
 	failures += test_register_with_callbacks();
 	failures += test_field_support_by_backend();
+	failures += test_outgoing_fec_validation();
+	failures += test_outgoing_fec_live();
 	failures += test_cv610_restart_only_mutability();
 	failures += test_qr_window_live_config_only();
 	failures += test_multi_set_live_success();

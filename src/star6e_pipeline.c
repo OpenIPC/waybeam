@@ -1822,7 +1822,8 @@ static int prepare_pipeline_config(Star6ePipelineState *state,
 	pconf->image_width     = pconf->sensor_width;
 	pconf->image_height    = pconf->sensor_height;
 	pconf->sensor_framerate = vcfg->video0.fps;
-	pconf->venc_max_rate   = vcfg->video0.bitrate;
+	pconf->venc_max_rate   = venc_fec_video_kbps(vcfg->outgoing.fec,
+		vcfg->video0.bitrate);
 
 	if (codec_config_resolve_codec_rc(vcfg->video0.rc_mode,
 	    &pconf->rc_codec, &pconf->rc_mode) != 0)
@@ -1840,6 +1841,7 @@ static int prepare_pipeline_config(Star6ePipelineState *state,
 		return -1;
 	pconf->output_setup.allow_unix_encoder_stall =
 		vcfg->outgoing.allow_unix_encoder_stall ? 1 : 0;
+	pconf->output_setup.fec = vcfg->outgoing.fec ? 1 : 0;
 
 	/* Auto-cap exposure to frame period so the AE shutter never exceeds
 	 * the frame period.  Without this, the AE converges on a long
@@ -2297,6 +2299,11 @@ static int bind_and_finalize_pipeline(Star6ePipelineState *state,
 			pconf->output_setup.requested_connected_udp;
 		state->output.allow_unix_encoder_stall =
 			pconf->output_setup.allow_unix_encoder_stall;
+		/* Parity too: the encoder was already given the FEC share. */
+		if (pconf->output_setup.fec &&
+		    star6e_output_set_fec(&state->output, 1) != 0)
+			fprintf(stderr, "ERROR: outgoing.fec could not allocate its "
+				"parity buffer; the encoder keeps the FEC share\n");
 		fprintf(stderr, "ERROR: outgoing.server could not be brought up; "
 			"starting with NO video output so the craft stays reachable -- "
 			"set outgoing.server over the API to recover\n");

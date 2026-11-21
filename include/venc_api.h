@@ -7,7 +7,7 @@
  * and fails if they drift.  0.73.0 shipped with the document on 0.22.0 and the
  * code still answering 0.21.0, so every craft advertised a contract it was not
  * serving. */
-#define VENC_CONTRACT_VERSION "0.32.0"
+#define VENC_CONTRACT_VERSION "0.33.0"
 #include "venc_config.h"
 
 #ifdef __cplusplus
@@ -57,6 +57,9 @@ typedef struct {
 	 * not need to reject size-based requests. Returns 0 on success,
 	 * -1 if the backend has no live state to mutate. */
 	int (*apply_max_payload_size)(uint16_t size);
+	/* Live-toggle RS parity (protocols/venc-fec.md); re-splits the bitrate.
+	 * NULL on backends without a parity sender. */
+	int (*apply_fec)(bool on);
 	/* Live-update the RC QP bounds (MinQp/MaxQp) in the RC param struct.
 	 * 0 leaves that bound at whatever the driver reported, so a config
 	 * that sets neither behaves exactly as before. These are knobs the SDK

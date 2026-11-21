@@ -3,6 +3,7 @@
 #include "timing.h"
 
 #include "output_socket.h"
+#include "rs_fec.h"
 #include "venc_config.h"
 #include "test_helpers.h"
 
@@ -291,6 +292,277 @@ static int test_star6e_output_shm_send_rtp(void)
 	if (attached)
 		venc_ring_destroy(attached);
 	star6e_output_teardown(&output);
+	return failures;
+}
+
+/* ── RS parity (protocols/venc-fec.md) ─────────────────────────────── */
+
+static uint32_t rd_u32(const uint8_t *p)
+{
+	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 |
+		(uint32_t)p[2] << 8 | p[3];
+}
+
+static uint8_t fec_byte(uint16_t seq, size_t j)
+{
+	return (uint8_t)(seq * 37u + j * 11u + 5u);
+}
+
+/* Run once, just before source packet g_fec_hook_at of the next frame. */
+static void (*g_fec_hook)(Star6eOutput *output);
+static unsigned g_fec_hook_at;
+
+/* Send one frame of `k` packets (seq from `base`, payload split 3 B + rest
+ * like an FU) and collect every datagram the receiver got. */
+static int fec_send_frame(Star6eOutput *output, int rx, uint16_t base,
+	unsigned k, size_t (*len_of)(unsigned), uint8_t (*pkts)[1500],
+	ssize_t *lens, int max_pkts)
+{
+	uint8_t header[12] = { 0x80, 97, 0, 0, 0, 0, 0x10, 0, 0x12, 0x34, 0x56, 0x78 };
+	uint8_t payload[1400];
+	int n = 0;
+
+	star6e_output_begin_frame(output);
+	for (unsigned i = 0; i < k; i++) {
+		const uint16_t seq = (uint16_t)(base + i);
+		const size_t len = len_of(i);
+
+		header[1] = (uint8_t)(97 | (i == k - 1 ? 0x80 : 0));
+		header[2] = (uint8_t)(seq >> 8);
+		header[3] = (uint8_t)seq;
+		for (size_t j = 0; j < len; j++)
+			payload[j] = fec_byte(seq, j);
+		if (g_fec_hook && i == g_fec_hook_at) {
+			g_fec_hook(output);
+			g_fec_hook = NULL;
+		}
+		if (star6e_output_send_rtp_parts(output, header, 12, payload, 3,
+		    payload + 3, len - 3) != 0)
+			return -1;
+	}
+	star6e_output_end_frame(output);
+	while (n < max_pkts) {
+		lens[n] = recv(rx, pkts[n], sizeof(pkts[n]), MSG_DONTWAIT);
+		if (lens[n] <= 0)
+			break;
+		n++;
+	}
+	return n;
+}
+
+static size_t fec_len_mixed(unsigned i) { return 600 + (i * 97) % 800; }
+static size_t fec_len_small(unsigned i) { return 60 + i * 20; }
+
+static int fec_open(Star6eOutput *output, int fec, int *rx)
+{
+	Star6eOutputSetup setup;
+	char uri[64];
+	uint16_t port;
+	int rcvbuf = 4 << 20;
+
+	*rx = create_udp_receiver(&port);
+	if (*rx < 0)
+		return -1;
+	(void)setsockopt(*rx, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+	snprintf(uri, sizeof(uri), "udp://127.0.0.1:%u", port);
+	if (star6e_output_prepare(&setup, uri, "rtp", 0) != 0)
+		return -1;
+	setup.fec = fec;
+	return star6e_output_init(output, &setup);
+}
+
+/* Check every parity datagram of a frame against an independent re-encode
+ * of the expected source symbols; return the parity count, -1 on a fault.
+ * Block sizes seen are written to ks[] (one entry per new block). */
+static int fec_check_parity(uint8_t (*pkts)[1500], const ssize_t *lens,
+	int n, unsigned k_total, uint16_t base, size_t (*len_of)(unsigned),
+	unsigned *ks)
+{
+	static uint8_t sym[STAR6E_FEC_BLOCK_MAX][STAR6E_FEC_SYM_MAX];
+	uint8_t want[STAR6E_FEC_SYM_MAX];
+	int parity = 0, nblocks = 0;
+	int last_base = -1;
+
+	for (int p = (int)k_total; p < n; p++) {
+		const uint8_t *d = pkts[p];
+		const unsigned k = d[14], idx = d[15];
+		const uint16_t bseq = (uint16_t)(d[16] << 8 | d[17]);
+		const unsigned first = (uint16_t)(bseq - base);
+		size_t maxlen = 0;
+
+		if ((d[1] & 0x7F) != STAR6E_FEC_PT || d[12] != 0x7E ||
+		    (d[13] & 0xC7) != 0x01 || k == 0 || k > STAR6E_FEC_BLOCK_MAX ||
+		    rd_u32(d + 8) != (0x12345678u ^ STAR6E_FEC_SSRC_XOR) ||
+		    rd_u32(d + 4) != 0x00001000u || lens[p] > 1420 ||
+		    (d[1] & 0x80))
+			return -1;
+		if (ks && bseq != last_base)
+			ks[nblocks++] = k;
+		last_base = bseq;
+		/* E is set exactly on the frame's last block. */
+		if (((d[13] & 0x20) != 0) != (first + k == k_total))
+			return -1;
+		for (unsigned i = 0; i < k; i++)
+			if (len_of(first + i) > maxlen)
+				maxlen = len_of(first + i);
+		memset(sym, 0, sizeof(sym));
+		for (unsigned i = 0; i < k; i++) {
+			const uint16_t seq = (uint16_t)(bseq + i);
+			const size_t len = len_of(first + i);
+
+			sym[i][0] = (uint8_t)(len >> 8);
+			sym[i][1] = (uint8_t)len;
+			for (size_t j = 0; j < len; j++)
+				sym[i][2 + j] = fec_byte(seq, j);
+		}
+		rs_fec_encode(k, idx, sym[0], sizeof(sym[0]), 2 + maxlen, want);
+		if (lens[p] != (ssize_t)(12 + STAR6E_FEC_HDR + 2 + maxlen) ||
+		    memcmp(d + 12 + STAR6E_FEC_HDR, want, 2 + maxlen) != 0)
+			return -1;
+		parity++;
+	}
+	return parity;
+}
+
+static int test_star6e_output_fec(void)
+{
+	static uint8_t pkts[256][1500];
+	static ssize_t lens[256];
+	Star6eOutput output;
+	uint64_t src_bytes = 0, par_bytes = 0;
+	unsigned ks[8] = { 0 };
+	int failures = 0, rx = -1, n, parity;
+	uint16_t seq = 65530; /* first frame wraps the media seq */
+
+	/* Control: fec off sends the source packets and nothing else. */
+	CHECK("fec off init", fec_open(&output, 0, &rx) == 0);
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 256);
+	CHECK("fec off: exactly the 12 source packets", n == 12);
+	star6e_output_teardown(&output);
+	close(rx);
+
+	CHECK("fec on init", fec_open(&output, 1, &rx) == 0);
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 256);
+	CHECK("fec on: sources first, untouched",
+		n > 12 && (pkts[0][1] & 0x7F) == 97 && lens[0] == 12 + 600 &&
+		pkts[0][12] == fec_byte(seq, 0) && (pkts[11][1] & 0x80));
+	parity = fec_check_parity(pkts, lens, n, 12, seq, fec_len_mixed, NULL);
+	CHECK("fec on: parity after the frame, valid, M=0", parity >= 1);
+	seq = (uint16_t)(seq + 12);
+
+	/* 100 sources split into 34 + 33 + 33, E only on the last block. */
+	n = fec_send_frame(&output, rx, seq, 100, fec_len_mixed, pkts, lens, 256);
+	parity = fec_check_parity(pkts, lens, n, 100, seq, fec_len_mixed, ks);
+	CHECK("fec on: 100 sources -> blocks of 34, 33, 33",
+		parity >= 3 && ks[0] == 34 && ks[1] == 33 && ks[2] == 33);
+	seq = (uint16_t)(seq + 100);
+
+	/* Small packets in slots that still hold the frame above's larger
+	 * ones: padding is to the block's own longest, byte-exact. */
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_small, pkts, lens, 256);
+	CHECK("fec on: stale larger slots never leak into parity",
+		fec_check_parity(pkts, lens, n, 12, seq, fec_len_small, NULL) >= 1);
+	seq = (uint16_t)(seq + 12);
+
+	/* Ratio: parity datagram bytes stay at 1/4 of source datagram bytes,
+	 * including 1-3 packet frames where r is mostly 0. */
+	for (unsigned f = 0; f < 3000; f++) {
+		const unsigned k = 1 + f % 3 + (f % 7 == 0 ? 9 : 0);
+
+		n = fec_send_frame(&output, rx, seq, k, fec_len_small, pkts, lens, 256);
+		for (int p = 0; p < n; p++)
+			*(p < (int)k ? &src_bytes : &par_bytes) += (uint64_t)lens[p];
+		seq = (uint16_t)(seq + k);
+	}
+	CHECK("fec ratio = 0.25 +- 1 %",
+		par_bytes * 1000 >= src_bytes * 240 &&
+		par_bytes * 1000 <= src_bytes * 260);
+	CHECK("fec counters move",
+		output.fec_parity_pkts > 0 && output.fec_unprotected > 0);
+	star6e_output_teardown(&output);
+	close(rx);
+	return failures;
+}
+
+static size_t fec_len_600(unsigned i) { (void)i; return 600; }
+static void fec_hook_off(Star6eOutput *output) { star6e_output_set_fec(output, 0); }
+static void fec_hook_give_up(Star6eOutput *output)
+{
+	output->batch.discard_remaining = 1; /* as after ENOBUFS / budget */
+}
+static void fec_hook_no_budget(Star6eOutput *output)
+{
+	output->batch.flush_budget_us = 0; /* the flush sends, then gives up */
+}
+
+/* Live outgoing.fec: a toggle takes effect at the next frame and never
+ * splits one; a frame past STAR6E_FEC_MAX_SRC keeps its first 256 protected
+ * with no E; a frame whose video flush gave up gets no parity. */
+static int test_star6e_output_fec_live(void)
+{
+	static uint8_t pkts[400][1500];
+	static ssize_t lens[400];
+	Star6eOutput output;
+	int failures = 0, rx = -1, n;
+	uint32_t unprot, par, drops;
+	uint16_t seq = 100;
+
+	CHECK("fec live: init off", fec_open(&output, 0, &rx) == 0 &&
+		!output.fec_arena);
+	CHECK("fec live: enable", star6e_output_set_fec(&output, 1) == 0 &&
+		output.fec_arena);
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: parity from the next frame",
+		fec_check_parity(pkts, lens, n, 12, seq, fec_len_mixed, NULL) >= 1);
+	seq = (uint16_t)(seq + 12);
+
+	g_fec_hook = fec_hook_off;
+	g_fec_hook_at = 5;
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: off mid-frame still finishes that frame's parity",
+		fec_check_parity(pkts, lens, n, 12, seq, fec_len_mixed, NULL) >= 1);
+	seq = (uint16_t)(seq + 12);
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: then off", n == 12);
+	seq = (uint16_t)(seq + 12);
+
+	CHECK("fec live: re-enable keeps the arena",
+		star6e_output_set_fec(&output, 1) == 0 && output.fec_arena);
+	unprot = output.fec_unprotected;
+	n = fec_send_frame(&output, rx, seq, 300, fec_len_600, pkts, lens, 400);
+	CHECK("fec live: 300 sources, first 256 protected, no E",
+		n > 300 && fec_check_parity(pkts, lens, n, 300, seq, fec_len_600,
+		NULL) >= 7 && output.fec_unprotected - unprot == 300 - 256);
+	seq = (uint16_t)(seq + 300);
+
+	par = output.fec_parity_pkts;
+	drops = output.socket_drops;
+	unprot = output.fec_unprotected;
+	g_fec_hook = fec_hook_give_up;
+	g_fec_hook_at = 6;
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	/* The give-up also drops the 6 still queued: nothing reaches rx. */
+	CHECK("fec live: no parity after the video flush gave up",
+		n == 0 && output.fec_parity_pkts == par &&
+		output.socket_drops - drops == 12 && /* video only */
+		output.fec_unprotected == unprot); /* refused, not unprotected */
+	seq = (uint16_t)(seq + 12);
+	unprot = output.fec_unprotected;
+	g_fec_hook = fec_hook_no_budget;
+	g_fec_hook_at = 0;
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: budget spent, video whole -> 12 unprotected, no parity",
+		n == 12 && output.fec_unprotected - unprot == 12);
+	seq = (uint16_t)(seq + 12);
+	par = output.fec_parity_pkts;
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: parity counted as sent",
+		n > 12 && output.fec_parity_pkts - par == (uint32_t)(n - 12));
+
+	star6e_output_teardown(&output);
+	CHECK("fec live: teardown clears the flag",
+		!output.fec_on && !output.fec_arena);
+	close(rx);
 	return failures;
 }
 
@@ -2154,6 +2426,8 @@ int test_star6e_output(void)
 	failures += test_star6e_output_udp_invalid_host_rejected();
 	failures += test_star6e_output_udp_apply_server();
 	failures += test_star6e_output_udp_send_rtp();
+	failures += test_star6e_output_fec();
+	failures += test_star6e_output_fec_live();
 	failures += test_star6e_output_udp_send_compact();
 	failures += test_star6e_output_unix_send_rtp();
 	failures += test_star6e_output_unix_send_compact();
