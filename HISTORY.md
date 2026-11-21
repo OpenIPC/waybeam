@@ -15,8 +15,11 @@ on a radio link whose ground recovers it. Contract 0.35.0 (additive).
 - **Load rule:** a CV610 config file pairing `fec:true` with a `frame-shm://`
   server (CV610's usual transport) or `maxPayloadSize` above 3780 no longer
   loads, as on Star6E. In 0.87.4-0.87.x CV610 ignored the key.
-- A packet the socket drops with `EAGAIN` still counts as a source, so its
-  parity can rebuild it. After a hard send failure the frame gets no parity.
+- A frame that lost a packet to the socket (`EAGAIN`, or a hard failure)
+  gets no parity, as on Star6E: the queue is already full.
+- **Upgrade note:** a CV610 fleet whose configs were copied from a Star6E
+  camera with `fec:true` but run `frame-shm://` will not start on 0.88.0
+  (no video and no HTTP) until `fec` is set false in the file.
 - `GET /api/v1/transport/status` on CV610 `udp://` / `unix://` gains
   `fecParityPkts`, `fecUnprotected` and `rtpPayload`; `packetsSent` includes
   parity, as on Star6E.

@@ -286,29 +286,19 @@ static int cv610_update_venc_attr(uint32_t bitrate, uint32_t gop,
 	return ret == TD_SUCCESS ? 0 : -1;
 }
 
-/* video0.bitrate is the wire total: with RS parity on, the encoder gets its
- * video share, held to the encoder rails after the split. */
-static uint32_t cv610_encoder_kbps(uint32_t total_kbps, int fec)
-{
-	uint32_t kbps = venc_fec_video_kbps(fec, total_kbps);
-
-	if (kbps > VENC_BITRATE_MAX_KBPS)
-		kbps = VENC_BITRATE_MAX_KBPS;
-	if (kbps < VENC_BITRATE_MIN_KBPS)
-		kbps = VENC_BITRATE_MIN_KBPS;
-	return kbps;
-}
-
+/* video0.bitrate is the wire total: with RS parity on, the encoder gets
+ * its video share (venc_fec_video_kbps). */
 static int cv610_apply_bitrate(uint32_t kbps)
 {
 	int ret;
 
 	if (!g_cv610_runner)
 		return -1;
-	ret = cv610_update_venc_attr(cv610_encoder_kbps(kbps,
-		__atomic_load_n(&g_cv610_runner->fec.on, __ATOMIC_RELAXED)), 0, 1u);
+	ret = cv610_update_venc_attr(venc_fec_video_kbps(
+		__atomic_load_n(&g_cv610_runner->fec.on, __ATOMIC_RELAXED), kbps),
+		0, 1u);
 
-	if (ret == 0 && g_cv610_runner)
+	if (ret == 0)
 		__atomic_store_n(&g_cv610_runner->live_bitrate, kbps,
 			__ATOMIC_RELEASE);
 	return ret;
@@ -330,15 +320,14 @@ static int cv610_apply_fec(bool on)
 	if (__atomic_load_n(&ctx->fec.on, __ATOMIC_RELAXED) == (int)on)
 		return 0;
 	total = __atomic_load_n(&ctx->live_bitrate, __ATOMIC_ACQUIRE);
-	if (on && cv610_update_venc_attr(cv610_encoder_kbps(total, 1), 0,
+	if (on && cv610_update_venc_attr(venc_fec_video_kbps(1, total), 0,
 	    1u) != 0)
 		return -1;
 	if (venc_fec_set(&ctx->fec, on) != 0) {
-		(void)cv610_update_venc_attr(cv610_encoder_kbps(total, 0), 0, 1u);
+		(void)cv610_update_venc_attr(total, 0, 1u);
 		return -1;
 	}
-	if (!on && cv610_update_venc_attr(cv610_encoder_kbps(total, 0), 0,
-	    1u) != 0) {
+	if (!on && cv610_update_venc_attr(total, 0, 1u) != 0) {
 		(void)venc_fec_set(&ctx->fec, 1);
 		return -1;
 	}
@@ -1708,8 +1697,8 @@ static uint32_t cv610_frame_vcl_nal_count(const uint8_t *frame, size_t len)
 }
 
 /* Video datagrams.  A 0 return (sent, or counted as an EAGAIN drop) used
- * its sequence number, so the packet is a parity source: source i stays seq
- * base + i, and parity can rebuild the dropped one. */
+ * its sequence number, so the packet is captured either way: source i
+ * stays seq base + i. */
 static int cv610_video_write(const uint8_t *header, size_t header_len,
 	const uint8_t *payload1, size_t payload1_len,
 	const uint8_t *payload2, size_t payload2_len, void *opaque)
@@ -1733,6 +1722,8 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 	int nal_count = 0;
 	int status = 0;
 	uint32_t slices = 0, slice_bytes = 0;
+	const uint64_t drops0 = __atomic_load_n(&ctx->output_drops,
+		__ATOMIC_RELAXED);
 	uint16_t max_payload;
 
 	venc_fec_begin_frame(&ctx->fec);
@@ -1775,9 +1766,12 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 			(ctx->slice_avg * 7 + mean) / 8 : mean;
 	}
 	__atomic_store_n(&ctx->payload_used, max_payload, __ATOMIC_RELAXED);
-	/* Parity after the video, and none after a hard send failure: that
-	 * socket just gave up.  Counted as it reaches the socket. */
-	if (status == 0 && ctx->fec.count) {
+	/* Parity after the video, and none for a frame that lost a packet
+	 * (an EAGAIN drop or a hard failure): the queue is already full, and
+	 * the spec sends no parity for a frame the sender had to drop from,
+	 * as Star6E does.  Counted as it reaches the socket. */
+	if (status == 0 && ctx->fec.count &&
+	    __atomic_load_n(&ctx->output_drops, __ATOMIC_RELAXED) == drops0) {
 		const uint64_t sent0 = __atomic_load_n(&ctx->packets_sent,
 			__ATOMIC_RELAXED);
 
@@ -2096,8 +2090,8 @@ static int cv610_venc_start(Cv610RunnerContext *ctx)
 	attr.rc_attr.h265_cbr.stats_time = 1;
 	attr.rc_attr.h265_cbr.src_frame_rate = ctx->pipeline.fps;
 	attr.rc_attr.h265_cbr.dst_frame_rate = ctx->pipeline.fps;
-	attr.rc_attr.h265_cbr.bit_rate = cv610_encoder_kbps(
-		ctx->config.video0.bitrate, ctx->config.outgoing.fec);
+	attr.rc_attr.h265_cbr.bit_rate = venc_fec_video_kbps(
+		ctx->config.outgoing.fec, ctx->config.video0.bitrate);
 	attr.gop_attr.gop_mode = OT_VENC_GOP_MODE_NORMAL_P;
 	/* normal_p.ip_qp_delta is deliberately left at 0.  The CBR rate
 	 * controller stores it and ignores it -- measured across -12..+12, live
