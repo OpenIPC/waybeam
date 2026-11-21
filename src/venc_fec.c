@@ -124,8 +124,9 @@ void venc_fec_emit(VencFec *fec, RtpPacketizerWriteFn write, void *opaque)
 			memset(s + 2 + len, 0, maxlen - len);
 		}
 
-		rs_fec_encode(k, r, src, VENC_FEC_SYM_MAX, 2 + maxlen,
-			par + VENC_FEC_HDR, PAR_ROW);
+		if (r)
+			rs_fec_encode(k, r, src, VENC_FEC_SYM_MAX, 2 + maxlen,
+				par + VENC_FEC_HDR, PAR_ROW);
 		for (i = 0; i < r; i++) {
 			uint8_t *row = par + (size_t)i * PAR_ROW;
 

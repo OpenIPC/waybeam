@@ -392,6 +392,7 @@ static int fec_check_parity(uint8_t (*pkts)[1500], const ssize_t *lens,
 
 		if ((d[1] & 0x7F) != VENC_FEC_PT || d[12] != 0x7E ||
 		    (d[13] & 0xC7) != 0x01 || k == 0 || k > VENC_FEC_BLOCK_MAX ||
+		    idx >= k ||
 		    rd_u32(d + 8) != (0x12345678u ^ VENC_FEC_SSRC_XOR) ||
 		    rd_u32(d + 4) != 0x00001000u || lens[p] > 1420 ||
 		    (d[1] & 0x80))
