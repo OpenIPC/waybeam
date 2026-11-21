@@ -21,8 +21,8 @@ actually delivers it.
   90 kHz media clock ran 1.67x fast (and 3.3x slow at 30 from a 100 start),
   misleading jitter buffers, A/V sync and sidecar timing. The step is now
   re-derived from the delivered rate on every live fps change.
-- The live fps log lines are flushed: Star6E stdout is block-buffered into
-  the log file, so they could appear minutes late or not before a crash.
+- The live fps log lines go to stderr: Star6E stdout is block-buffered and
+  runs through the audio filter pipe, and device logs lost some of them.
 - A live ISP-bin reload re-kicks the sensor at its running rate, not the
   mode maximum, which on a 60 fps start silently moved the sensor to the
   mode's top rate.

@@ -536,9 +536,8 @@ static uint32_t raise_sensor_fps(uint32_t fps)
 		(void)star6e_pipeline_cap_exposure_for_fps(fps,
 			vcfg->isp.shutter_rule_180);
 	if (MI_SNR_SetFps(ps->sensor.pad_id, fps) != 0) {
-		printf("> Sensor SetFps(%u) failed, staying at %u fps\n", fps,
-			ps->sensor.fps);
-		fflush(stdout);
+		fprintf(stderr, "> Sensor SetFps(%u) failed, staying at %u fps\n",
+			fps, ps->sensor.fps);
 		if (vcfg)
 			(void)star6e_pipeline_cap_exposure_for_fps(
 				ps->sensor.fps, vcfg->isp.shutter_rule_180);
@@ -549,7 +548,7 @@ static uint32_t raise_sensor_fps(uint32_t fps)
 		(void)MI_SNR_SetOrien(ps->sensor.pad_id,
 			(uint8_t)(vcfg->image.mirror ? 1 : 0),
 			(uint8_t)(vcfg->image.flip ? 1 : 0));
-	printf("> Sensor fps %u -> %u\n", ps->sensor.fps, fps);
+	fprintf(stderr, "> Sensor fps %u -> %u\n", ps->sensor.fps, fps);
 	ps->sensor.fps = fps;
 	return fps;
 }
@@ -653,9 +652,10 @@ static int apply_fps(uint32_t fps)
 	 * off, and the startup idle transition has no consumer at all.  Only
 	 * the live video0.fps write needs it, so it is issued there — see
 	 * apply_fps_live(). */
-	printf("> FPS delivered %u, RC fpsNum %u (bind %u:%u)\n", fps, rc_fps,
-		sensor_fps, fps);
-	fflush(stdout); /* Star6E stdout is block-buffered into the log */
+	/* stderr: Star6E stdout is block-buffered and runs through the audio
+	 * filter pipe, and live-trial logs lost these lines on it. */
+	fprintf(stderr, "> FPS delivered %u, RC fpsNum %u (bind %u:%u)\n", fps,
+		rc_fps, sensor_fps, fps);
 	return 0;
 }
 
