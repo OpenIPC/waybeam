@@ -1,5 +1,19 @@
 # History
 
+## [0.88.2] - 2026-11-21
+
+`init.d/S95waybeam` (Star6E and Maruko):
+
+- **`start` right after a SIGTERM now starts venc.** The exiting instance still
+  shows in `pidof` while it tears down, so `start` said "already running",
+  returned 0, and left nothing running once the old one exited. It now waits
+  up to 10 s for an exiting instance first. A `start` against a healthy one
+  costs that wait before it reports "already running".
+- **`stop` never sends SIGKILL.** A killed venc leaves the SigmaStar MI_SYS /
+  MI_VENC kernel state wedged until a power cycle. After 30 s of SIGTERM, up
+  from 15, `stop` reports FAILED, returns 1 and says to reboot, and `restart`
+  then does not start a second instance.
+
 ## [0.88.1] - 2026-11-21
 
 Star6E: with `isp.shutterRule180`, a live fps raise moves the 180-degree

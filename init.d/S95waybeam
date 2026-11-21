@@ -88,18 +88,18 @@ stage_detect_model() {
     esac
 }
 
+# Wait up to $1 seconds for the daemon (and any orphan helper) to exit.
+# Never SIGKILL: venc's SIGTERM handler is what releases the SigmaStar
+# MI_SYS / MI_VENC kernel state, and a killed venc leaves it wedged until a
+# power cycle.  A venc that ignores 30 s of SIGTERM is already hung there.
 wait_exit() {
-    # Wait up to 15 seconds for the daemon (and any orphan helper) to
-    # fully exit.
     i=0
-    while [ $i -lt 30 ]; do
+    while [ $i -lt $(($1 * 2)) ]; do
         still_running || return 0
         sleep 0.5
         i=$((i + 1))
     done
-    echo "Warning: $DAEMON did not exit in time, killing"
-    killall -9 "$DAEMON" "$RESPAWN" "$WATCHDOG" 2>/dev/null
-    sleep 1
+    return 1
 }
 
 # unix:// video output rides an AF_UNIX datagram socket, which blocks the
@@ -123,7 +123,11 @@ raise_unix_dgram_qlen() {
 }
 
 start() {
-    if still_running; then
+    # A venc that was just sent SIGTERM still shows in pidof while it tears
+    # down (up to ~10 s in MI_SYS_Exit).  Calling that "already running"
+    # returned 0 and left nothing running once it exited, so let it finish
+    # first.  A start against a healthy instance costs only this wait.
+    if still_running && ! wait_exit 10; then
         echo "$DAEMON already running"
         return 0
     fi
@@ -152,14 +156,19 @@ start() {
 stop() {
     echo -n "Stopping $DAEMON: "
     killall "$DAEMON" "$RESPAWN" "$WATCHDOG" 2>/dev/null
-    wait_exit
-    echo "OK"
+    if wait_exit 30; then
+        echo "OK"
+        return 0
+    fi
+    echo "FAILED: still running after 30 s of SIGTERM; not sending SIGKILL" \
+        "(it wedges the SigmaStar encoder until a power cycle), reboot to recover"
+    return 1
 }
 
 case "$1" in
     start)   start ;;
     stop)    stop ;;
-    restart) stop; start ;;
+    restart) stop && start ;;
     *)
         echo "Usage: $0 {start|stop|restart}"
         exit 1
