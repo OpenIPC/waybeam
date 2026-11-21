@@ -32,10 +32,57 @@ static const struct { unsigned k, r; const unsigned *len; const uint8_t *const *
 	{ 26, 7, len2, par2 },
 };
 
+/* Bytewise GF(256) reference, independent of rs_fec.c's tables and NEON
+ * path: for symbols past one 1 KB tile, which the vectors above are not. */
+static uint8_t ref_mul(uint8_t a, uint8_t b)
+{
+	uint8_t p = 0;
+
+	while (b) {
+		if (b & 1)
+			p ^= a;
+		a = (uint8_t)((a << 1) ^ (a & 0x80 ? 0x1D : 0));
+		b >>= 1;
+	}
+	return p;
+}
+
+static uint8_t ref_inv(uint8_t a)
+{
+	for (unsigned b = 1; b < 256; b++)
+		if (ref_mul(a, (uint8_t)b) == 1)
+			return (uint8_t)b;
+	return 0;
+}
+
+static int test_rs_fec_long_symbols(void)
+{
+	enum { K = 40, R = 10, LEN = 3782 }; /* 3 full tiles + a 710 B tail */
+	static uint8_t src[K][LEN], out[R][LEN], want[LEN];
+	int failures = 0;
+
+	for (unsigned i = 0; i < K; i++)
+		for (unsigned j = 0; j < LEN; j++)
+			src[i][j] = (uint8_t)((i * 131 + j * 7 + (j >> 9)) & 0xFF);
+	rs_fec_encode(K, R, src[0], LEN, LEN, out[0], LEN);
+	for (unsigned r = 0; r < R; r++) {
+		memset(want, 0, sizeof(want));
+		for (unsigned i = 0; i < K; i++) {
+			const uint8_t c = ref_inv((uint8_t)((K + r) ^ i));
+
+			for (unsigned j = 0; j < LEN; j++)
+				want[j] ^= ref_mul(c, src[i][j]);
+		}
+		CHECK("rs_fec long symbols match the bytewise reference",
+			memcmp(out[r], want, LEN) == 0);
+	}
+	return failures;
+}
+
 int test_rs_fec(void)
 {
 	static uint8_t sym[26][2 + 40];
-	uint8_t out[2 + 40];
+	static uint8_t out[26][2 + 40];
 	int failures = 0;
 	size_t c;
 
@@ -52,12 +99,12 @@ int test_rs_fec(void)
 			for (j = 0; j < g_cases[c].len[i]; j++)
 				sym[i][2 + j] = (uint8_t)((i * 37 + j * 11 + 5) & 0xFF);
 		}
-		for (j = 0; j < g_cases[c].r; j++) {
-			rs_fec_encode(g_cases[c].k, j, sym[0], sizeof(sym[0]),
-				2 + maxlen, out);
+		rs_fec_encode(g_cases[c].k, g_cases[c].r, sym[0], sizeof(sym[0]),
+			2 + maxlen, out[0], sizeof(out[0]));
+		for (j = 0; j < g_cases[c].r; j++)
 			CHECK("rs_fec matches the waybeam-link vector",
-				memcmp(out, g_cases[c].par[j], 2 + maxlen) == 0);
-		}
+				memcmp(out[j], g_cases[c].par[j], 2 + maxlen) == 0);
 	}
+	failures += test_rs_fec_long_symbols();
 	return failures;
 }

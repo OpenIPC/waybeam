@@ -65,15 +65,27 @@ static void gf_mul_xor(uint8_t c, const uint8_t *in, uint8_t *out, size_t len)
 			out[i] ^= g_exp[lc + g_log[in[i]]];
 }
 
-void rs_fec_encode(unsigned k, unsigned idx, const uint8_t *src,
-	size_t stride, size_t len, uint8_t *out)
-{
-	const uint8_t x = (uint8_t)(k + idx);
+/* All rows in one pass over the block, a 1 KB tile of every source and
+ * every row at a time: a block larger than L1 is read from L2 once, not
+ * once per row.  Byte-identical to one row at a time, and 9-19 % faster
+ * on a Cortex-A7 (CV610, 2026-11-21: k 6-40, r 2-40, 1400-3780 B). */
+#define RS_FEC_TILE 1024
 
+void rs_fec_encode(unsigned k, unsigned r, const uint8_t *src,
+	size_t stride, size_t len, uint8_t *out, size_t out_stride)
+{
 	pthread_once(&g_once, gf_init);
-	memset(out, 0, len);
-	/* x ^ i != 0 because k + idx <= 255 keeps x out of 0..k-1. */
-	for (unsigned i = 0; i < k; i++)
-		gf_mul_xor(g_exp[255 - g_log[(uint8_t)(x ^ i)]], src + i * stride,
-			out, len);
+	for (unsigned j = 0; j < r; j++)
+		memset(out + j * out_stride, 0, len);
+	for (size_t t = 0; t < len; t += RS_FEC_TILE) {
+		const size_t n = len - t < RS_FEC_TILE ? len - t : RS_FEC_TILE;
+
+		/* Row x = k + j: x ^ i != 0 because k + j <= 255 keeps x out of
+		 * 0..k-1. */
+		for (unsigned i = 0; i < k; i++)
+			for (unsigned j = 0; j < r; j++)
+				gf_mul_xor(g_exp[255 - g_log[(uint8_t)((k + j) ^ i)]],
+					src + i * stride + t,
+					out + j * out_stride + t, n);
+	}
 }

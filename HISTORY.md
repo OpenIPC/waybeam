@@ -1,5 +1,16 @@
 # History
 
+## [0.88.3] - 2026-11-21
+
+RS parity (`outgoing.fec`, Star6E and CV610): the encoder computes all of a
+block's parity rows in one pass, in 1 KB tiles of every source and every row,
+instead of re-reading the whole block once per row. The parity is
+byte-identical. On a Cortex-A7 (CV610) it is 9-19 % faster across block sizes
+(k 6-40, r 2-40, 1400-3780 B): a keyframe block of 40 sources and 10 parity at
+3780 B drops from 4.9 to 4.0 ms. That is most of the saving on keyframes. The
+parity arena grows by one block of rows (151 KB, allocated with the rest on
+the first enable).
+
 ## [0.88.2] - 2026-11-21
 
 `init.d/S95waybeam` (Star6E and Maruko), and the start fix also in

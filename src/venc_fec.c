@@ -6,6 +6,8 @@
 #include <string.h>
 
 #define RTP_HEADER_BYTES 12
+#define PAR_ROW (VENC_FEC_HDR + VENC_FEC_SYM_MAX) /* one parity datagram */
+#define ARENA_SRC_BYTES ((size_t)VENC_FEC_MAX_SRC * VENC_FEC_SYM_MAX)
 
 static uint16_t read_be16(const uint8_t *p)
 {
@@ -27,7 +29,9 @@ static void write_be16(uint8_t *p, uint16_t v)
 int venc_fec_set(VencFec *fec, int on)
 {
 	if (on && !fec->arena) {
-		fec->arena = malloc((size_t)VENC_FEC_MAX_SRC * VENC_FEC_SYM_MAX);
+		/* The frame's sources, then one block's parity rows (r <= k). */
+		fec->arena = malloc(ARENA_SRC_BYTES +
+			(size_t)VENC_FEC_BLOCK_MAX * PAR_ROW);
 		if (!fec->arena)
 			return -1;
 		fec->rtp.payload_type = VENC_FEC_PT;
@@ -83,7 +87,7 @@ void venc_fec_emit(VencFec *fec, RtpPacketizerWriteFn write, void *opaque)
 {
 	const unsigned total = fec->count;
 	const unsigned nb = (total + VENC_FEC_BLOCK_MAX - 1) / VENC_FEC_BLOCK_MAX;
-	uint8_t par[VENC_FEC_HDR + VENC_FEC_SYM_MAX];
+	uint8_t *const par = fec->arena + ARENA_SRC_BYTES;
 	unsigned b, i, first = 0;
 
 	for (b = 0; b < nb; b++) {
@@ -120,17 +124,20 @@ void venc_fec_emit(VencFec *fec, RtpPacketizerWriteFn write, void *opaque)
 			memset(s + 2 + len, 0, maxlen - len);
 		}
 
-		par[0] = 0x7E; /* H.265 NAL type 63: decoders ignore it */
-		par[1] = (uint8_t)((b == nb - 1 && fec->frame == 1 ?
-			0x20 : 0) | 0x01);
-		par[2] = (uint8_t)k;
-		write_be16(par + 4, (uint16_t)(fec->base_seq + first));
+		if (r)
+			rs_fec_encode(k, r, src, VENC_FEC_SYM_MAX, 2 + maxlen,
+				par + VENC_FEC_HDR, PAR_ROW);
 		for (i = 0; i < r; i++) {
-			par[3] = (uint8_t)i;
-			rs_fec_encode(k, i, src, VENC_FEC_SYM_MAX, 2 + maxlen,
-				par + VENC_FEC_HDR);
+			uint8_t *row = par + (size_t)i * PAR_ROW;
+
+			row[0] = 0x7E; /* H.265 NAL type 63: decoders ignore it */
+			row[1] = (uint8_t)((b == nb - 1 && fec->frame == 1 ?
+				0x20 : 0) | 0x01);
+			row[2] = (uint8_t)k;
+			row[3] = (uint8_t)i;
+			write_be16(row + 4, (uint16_t)(fec->base_seq + first));
 			(void)rtp_packetizer_send_packet(&fec->rtp, write,
-				opaque, par, VENC_FEC_HDR + 2 + maxlen,
+				opaque, row, VENC_FEC_HDR + 2 + maxlen,
 				NULL, 0, 0);
 		}
 		first += k;
