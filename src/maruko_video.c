@@ -2,7 +2,6 @@
 
 #include "venc_rec_writer.h"
 
-#include "h26x_util.h"
 #include "hevc_rtp.h"
 #include "rtp_packetizer.h"
 #include "rtp_session.h"
@@ -261,10 +260,7 @@ static size_t maruko_send_frame_hevc(const i6c_venc_strm *stream,
 
 		for (k = 0; k < nal_count; ++k) {
 			const uint8_t *data = NULL;
-			const uint8_t *nal_ptr;
 			size_t length = 0;
-			size_t nal_len;
-			uint8_t nal_type;
 			int last_nal;
 
 			if (pack->packNum > 0) {
@@ -283,33 +279,12 @@ static size_t maruko_send_frame_hevc(const i6c_venc_strm *stream,
 				length = pack->length - pack->offset;
 			}
 
-			nal_ptr = data;
-			nal_len = length;
-			h26x_util_strip_start_code(&nal_ptr, &nal_len);
-			if (!nal_ptr || nal_len == 0)
-				continue;
-
-			nal_type = h26x_util_hevc_nalu_type(nal_ptr, nal_len);
-			if (pack->packNum > 0)
-				nal_type = (uint8_t)pack->packetInfo[k].packType.h265Nalu;
-
-			if (params)
-				h26x_param_sets_update(params, PT_H265, nal_type,
-					nal_ptr, nal_len);
-
 			last_nal = (i == stream->count - 1) &&
 				((pack->packNum > 0 && k == nal_count - 1) ||
 				 (pack->packNum == 0));
-
-			if (params) {
-				total_bytes += hevc_rtp_prepend_param_sets(params,
-					nal_type, &state, maruko_rtp_write,
-					ctx, max_payload, stats);
-			}
-
-			total_bytes += hevc_rtp_send_nal(nal_ptr, nal_len,
-				&state, maruko_rtp_write, ctx, last_nal,
-				max_payload, stats);
+			total_bytes += hevc_rtp_send_annexb(data, length, params,
+				&state, maruko_rtp_write, ctx, last_nal, max_payload,
+				stats);
 		}
 	}
 

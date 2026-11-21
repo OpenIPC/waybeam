@@ -29,4 +29,15 @@ size_t hevc_rtp_prepend_param_sets(const H26xParamSets *params, uint8_t nal_type
 	RtpPacketizerState *rtp, RtpPacketizerWriteFn write_cb, void *opaque,
 	size_t max_payload, HevcRtpStats *stats);
 
+/** Send one encoder pack region as one RTP NAL (single or FU) per Annex-B
+ *  NAL: every slice segment travels on its own, so a lost packet costs one
+ *  slice instead of the picture.  A region with no start code is one raw
+ *  NAL.  With params, every NAL updates the parameter sets and VPS/SPS/PPS
+ *  go out once, before an IRAP picture's first slice.  is_last puts the
+ *  marker on the region's final packet only. */
+size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
+	H26xParamSets *params, RtpPacketizerState *rtp,
+	RtpPacketizerWriteFn write_cb, void *opaque, int is_last,
+	size_t max_payload, HevcRtpStats *stats);
+
 #endif /* HEVC_RTP_H */

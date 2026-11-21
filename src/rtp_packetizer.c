@@ -52,6 +52,7 @@ size_t rtp_packetizer_send_hevc_fu(RtpPacketizerState *state,
 	size_t remaining;
 	size_t total_bytes = 0;
 	size_t max_fragment;
+	size_t pieces;
 	int start = 1;
 	uint8_t fu_hdr[3];
 	uint8_t nal_header0;
@@ -86,8 +87,12 @@ size_t rtp_packetizer_send_hevc_fu(RtpPacketizerState *state,
 
 	payload = data + 2;
 	remaining = length - 2;
+	/* Equal fragments, not full ones and a small tail: the same packet
+	 * count, but a shorter longest packet, and an RS parity symbol is as
+	 * long as its block's longest packet (protocols/venc-fec.md). */
+	pieces = (remaining + max_fragment - 1) / max_fragment;
 	while (remaining > 0) {
-		size_t chunk = remaining > max_fragment ? max_fragment : remaining;
+		size_t chunk = (remaining + pieces - 1) / pieces;
 		int end = (remaining == chunk);
 		int marker = (end && is_last) ? 1 : 0;
 
@@ -109,6 +114,7 @@ size_t rtp_packetizer_send_hevc_fu(RtpPacketizerState *state,
 		total_bytes += chunk;
 		payload += chunk;
 		remaining -= chunk;
+		pieces--;
 		start = 0;
 	}
 
