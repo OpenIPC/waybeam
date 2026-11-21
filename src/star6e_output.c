@@ -916,11 +916,15 @@ int star6e_output_end_frame(Star6eOutput *output)
 
 	if (!output || !output->batch.active)
 		return 0;
-	/* Video first, so the frame never waits on its parity encode; none if
-	 * that flush gave up (budget or socket full).  fec_count is 0 unless
+	/* Video first, so the frame never waits on its parity encode; none,
+	 * counted unprotected, once the frame's budget is spent or the socket
+	 * gave up -- even if every video packet went out.  fec_count is 0 unless
 	 * fec_frame latched on.  Parity is counted as it reaches the socket. */
 	sent = star6e_batch_flush(output);
-	if (output->fec_count && !output->batch.discard_remaining) {
+	if (output->fec_count && output->batch.discard_remaining)
+		__atomic_fetch_add(&output->fec_unprotected, output->fec_count,
+			__ATOMIC_RELAXED);
+	else if (output->fec_count) {
 		const uint32_t w0 = __atomic_load_n(&output->socket_writes,
 			__ATOMIC_RELAXED);
 

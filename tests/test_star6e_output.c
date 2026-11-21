@@ -526,13 +526,15 @@ static int test_star6e_output_fec_live(void)
 
 	par = output.fec_parity_pkts;
 	drops = output.socket_drops;
+	unprot = output.fec_unprotected;
 	g_fec_hook = fec_hook_give_up;
 	g_fec_hook_at = 6;
 	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
 	/* The give-up also drops the 6 still queued: nothing reaches rx. */
 	CHECK("fec live: no parity after the video flush gave up",
 		n == 0 && output.fec_parity_pkts == par &&
-		output.socket_drops - drops == 12); /* video only */
+		output.socket_drops - drops == 12 && /* video only */
+		output.fec_unprotected - unprot == 12);
 	seq = (uint16_t)(seq + 12);
 	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
 	CHECK("fec live: parity counted as sent",

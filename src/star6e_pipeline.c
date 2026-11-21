@@ -2300,8 +2300,10 @@ static int bind_and_finalize_pipeline(Star6ePipelineState *state,
 		state->output.allow_unix_encoder_stall =
 			pconf->output_setup.allow_unix_encoder_stall;
 		/* Parity too: the encoder was already given the FEC share. */
-		if (pconf->output_setup.fec)
-			(void)star6e_output_set_fec(&state->output, 1);
+		if (pconf->output_setup.fec &&
+		    star6e_output_set_fec(&state->output, 1) != 0)
+			fprintf(stderr, "ERROR: outgoing.fec could not allocate its "
+				"parity buffer; the encoder keeps the FEC share\n");
 		fprintf(stderr, "ERROR: outgoing.server could not be brought up; "
 			"starting with NO video output so the craft stays reachable -- "
 			"set outgoing.server over the API to recover\n");

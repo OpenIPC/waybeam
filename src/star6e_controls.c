@@ -270,7 +270,7 @@ static uint32_t rc_compensate_kbps(uint32_t kbps, uint32_t delivered_fps)
  * cannot gate: MI_VENC_RcParam_t carries no bitrate field on either
  * SigmaStar backend (include/star6e.h), so there is no rate-only actuator
  * to switch to.  Calling SetChnAttr less often is the open follow-up. */
-static int apply_bitrate(uint32_t kbps)
+static int program_bitrate(uint32_t kbps, int fec)
 {
 	MI_VENC_ChnAttr_t attr = {0};
 	MI_U32 bits;
@@ -279,9 +279,7 @@ static int apply_bitrate(uint32_t kbps)
 	 * absolute MIN/MAX rails, so the correction cannot push the programmed
 	 * value outside what the encoder accepts.  With RS parity on, kbps is
 	 * the wire total and the encoder gets its video share. */
-	kbps = venc_fec_video_kbps(g_star6e_control_ctx.pipeline &&
-		__atomic_load_n(&g_star6e_control_ctx.pipeline->output.fec_on,
-			__ATOMIC_RELAXED), kbps);
+	kbps = venc_fec_video_kbps(fec, kbps);
 	kbps = rc_compensate_kbps(kbps, g_star6e_control_ctx.delivered_fps);
 	if (kbps > VENC_BITRATE_MAX_KBPS)
 		kbps = VENC_BITRATE_MAX_KBPS;
@@ -318,6 +316,13 @@ static int apply_bitrate(uint32_t kbps)
 	if (MI_VENC_SetChnAttr(g_star6e_control_ctx.venc_chn, &attr) != 0)
 		return -1;
 	return 0;
+}
+
+static int apply_bitrate(uint32_t kbps)
+{
+	return program_bitrate(kbps, g_star6e_control_ctx.pipeline &&
+		__atomic_load_n(&g_star6e_control_ctx.pipeline->output.fec_on,
+			__ATOMIC_RELAXED));
 }
 
 static int apply_encoder_gop(uint32_t gop_size)
@@ -1531,19 +1536,27 @@ static int apply_max_payload_size(uint16_t size)
 
 /* video0.bitrate is the wire total, so a toggle re-splits it: one
  * SetChnAttr, one IDR.  Parity starts or stops at the next frame.  Compares
- * the APPLIED flag, not vcfg (already committed), so a re-POST is free. */
+ * the APPLIED flag, not vcfg (already committed), so a re-POST is free.
+ * Rate first when turning on, flag first when turning off: no frame ever
+ * carries parity on top of the full video rate. */
 static int apply_fec(bool on)
 {
 	Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
+	uint32_t total;
 
 	if (!ps || !g_star6e_control_ctx.vcfg)
 		return -1;
 	if (__atomic_load_n(&ps->output.fec_on, __ATOMIC_RELAXED) == (int)on)
 		return 0;
-	if (star6e_output_set_fec(&ps->output, on) != 0)
+	total = g_star6e_control_ctx.vcfg->video0.bitrate;
+	if (on && program_bitrate(total, 1) != 0)
 		return -1;
-	if (apply_bitrate(g_star6e_control_ctx.vcfg->video0.bitrate) != 0) {
-		(void)star6e_output_set_fec(&ps->output, !on);
+	if (star6e_output_set_fec(&ps->output, on) != 0) {
+		(void)program_bitrate(total, 0);
+		return -1;
+	}
+	if (!on && program_bitrate(total, 0) != 0) {
+		(void)star6e_output_set_fec(&ps->output, 1);
 		return -1;
 	}
 	fprintf(stderr, "> outgoing.fec %s (live)\n", on ? "on" : "off");
