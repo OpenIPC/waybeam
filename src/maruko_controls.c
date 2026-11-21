@@ -411,6 +411,12 @@ static uint32_t maruko_query_live_fps(void);
  * the AE thread's auto ceiling move first, so AE never holds a shutter
  * longer than the new period; when lowering (a rollback), after.  The
  * 180-degree pin follows the new rate. */
+static void cap_exposure_for_fps(uint32_t fps, bool rule_180)
+{
+	(void)pipeline_common_cap_exposure_for_fps(fps, rule_180);
+	maruko_cus3a_set_sensor_fps(fps);
+}
+
 static int program_sensor_fps(uint32_t fps)
 {
 	MarukoBackendContext *b = g_ctx.backend;
@@ -418,21 +424,15 @@ static int program_sensor_fps(uint32_t fps)
 	const uint32_t prev = b->sensor.fps;
 	const int lower = fps < prev;
 
-	if (!lower) {
-		(void)pipeline_common_cap_exposure_for_fps(fps, rule_180);
-		maruko_cus3a_set_sensor_fps(fps);
-	}
+	if (!lower)
+		cap_exposure_for_fps(fps, rule_180);
 	if (maruko_pipeline_set_sensor_fps(b, fps) != 0) {
-		if (!lower) {
-			(void)pipeline_common_cap_exposure_for_fps(prev, rule_180);
-			maruko_cus3a_set_sensor_fps(prev);
-		}
+		if (!lower)
+			cap_exposure_for_fps(prev, rule_180);
 		return -1;
 	}
-	if (lower) {
-		(void)pipeline_common_cap_exposure_for_fps(fps, rule_180);
-		maruko_cus3a_set_sensor_fps(fps);
-	}
+	if (lower)
+		cap_exposure_for_fps(fps, rule_180);
 	if (rule_180)
 		maruko_cus3a_set_shutter_max(1000000 / (fps * 2));
 	g_ctx.sensor_fps = fps;
