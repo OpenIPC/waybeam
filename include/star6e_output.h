@@ -243,12 +243,12 @@ void star6e_output_reset(Star6eOutput *output);
 /** Create socket and connect to destination per setup config. */
 int star6e_output_init(Star6eOutput *output, const Star6eOutputSetup *setup);
 
-/** Check if active output uses RTP mode. */
 /* Live outgoing.fec (protocols/venc-fec.md).  The parity arena is
  * allocated on the first enable and kept until teardown; the encode thread
  * picks the flag up at the next begin_frame.  -1 when the output is not
  * udp:// / unix:// RTP or the allocation fails. */
 int star6e_output_set_fec(Star6eOutput *output, int on);
+/** Check if active output uses RTP mode. */
 int star6e_output_is_rtp(const Star6eOutput *output);
 
 /** Check if active output uses shared memory mode. */

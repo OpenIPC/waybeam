@@ -1110,8 +1110,8 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 	    strcmp(canonical_key, "isp.awb_fps") == 0)
 		return 0;
 
-	/* RS parity is built in the Star6E output batch only; Maruko has its
-	 * own sender (protocols/venc-fec.md). */
+	/* RS parity is built in the Star6E output batch only; the Maruko
+	 * sender has none (protocols/venc-fec.md). */
 	if (backend_name && strcmp(backend_name, "maruko") == 0 &&
 	    strcmp(canonical_key, "outgoing.fec") == 0)
 		return 0;

@@ -823,7 +823,7 @@ static int star6e_output_send_parts(Star6eOutput *output,
 	const uint8_t *payload2, size_t payload2_len);
 
 /* Keep a sent video packet's payload as a source symbol: 2 B length, then
- * the payload zero-padded to the arena stride.  Called only after a
+ * the payload (emit pads it to the block's longest).  Called only after a
  * successful send, and the packetizer advances seq only then, so source i
  * is always seq fec_base_seq + i.  The first packet that cannot be kept
  * ends capture for the frame (fec_frame = 2): later ones would break the
@@ -903,9 +903,9 @@ static void star6e_fec_emit(Star6eOutput *output)
 		for (i = 0; r && i < k; i++) {
 			uint8_t *s = output->fec_arena +
 				(size_t)(first + i) * STAR6E_FEC_SYM_MAX;
+			const size_t len = star6e_read_be16(s);
 
-			memset(s + 2 + star6e_read_be16(s), 0,
-				maxlen - star6e_read_be16(s));
+			memset(s + 2 + len, 0, maxlen - len);
 		}
 
 		par[0] = 0x7E; /* H.265 NAL type 63: decoders ignore it */
