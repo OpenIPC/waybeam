@@ -379,7 +379,7 @@ static int fec_check_parity(uint8_t (*pkts)[1500], const ssize_t *lens,
 	unsigned *ks)
 {
 	static uint8_t sym[VENC_FEC_BLOCK_MAX][VENC_FEC_SYM_MAX];
-	uint8_t want[VENC_FEC_SYM_MAX];
+	static uint8_t want[VENC_FEC_BLOCK_MAX][VENC_FEC_SYM_MAX];
 	int parity = 0, nblocks = 0;
 	int last_base = -1;
 
@@ -415,9 +415,10 @@ static int fec_check_parity(uint8_t (*pkts)[1500], const ssize_t *lens,
 			for (size_t j = 0; j < len; j++)
 				sym[i][2 + j] = fec_byte(seq, j);
 		}
-		rs_fec_encode(k, idx, sym[0], sizeof(sym[0]), 2 + maxlen, want);
+		rs_fec_encode(k, idx + 1, sym[0], sizeof(sym[0]), 2 + maxlen,
+			want[0], sizeof(want[0]));
 		if (lens[p] != (ssize_t)(12 + VENC_FEC_HDR + 2 + maxlen) ||
-		    memcmp(d + 12 + VENC_FEC_HDR, want, 2 + maxlen) != 0)
+		    memcmp(d + 12 + VENC_FEC_HDR, want[idx], 2 + maxlen) != 0)
 			return -1;
 		parity++;
 	}
