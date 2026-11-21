@@ -109,7 +109,7 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.87.4",
+    "app_version": "0.87.5",
     "contract_version": "0.34.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
@@ -691,11 +691,16 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
 ### Live FPS Control — Behavior Details
 
 Setting `video0.fps` via the API applies **hardware-level frame decimation** within the
-active sensor mode. The sensor continues running at its native `maxFps`; the MI_SYS bind
-layer between VPE and VENC drops frames to match the requested rate.
+active sensor mode. The sensor runs at the rate it was last programmed to (at startup,
+`video0.fps`); the MI_SYS bind layer between VPE and VENC drops frames to match a lower
+requested rate. On Star6E (since 0.87.3) and Maruko (since 0.87.5) a request above the
+programmed rate re-programs the sensor first (`MI_SNR_SetFps`, up to the mode's `maxFps`),
+except on a fallback sensor rate, with the dual stream, under Maruko `stab`/`stab-fill`
+framing, or after the sensor once refused; then the rate stays at what the sensor runs.
+The RTP timestamp step follows the delivered rate.
 
 ```bash
-# On a 90fps sensor mode: set output to 30fps (sensor stays at 90, VENC receives 30)
+# On a 90fps sensor mode started at 90: set output to 30fps (sensor stays at 90, VENC receives 30)
 curl "http://<device-ip>/api/v1/set?video0.fps=30"
 
 # Set output to 60fps
@@ -711,9 +716,11 @@ sets the output to 90fps. To access a higher sensor mode, edit `/etc/venc.json` 
 restart the process.
 
 **What happens under the hood:**
-1. VPE→VENC bind is torn down and re-established with `src_fps:dst_fps` ratio
-2. VENC rate control `fpsNum` is updated for correct bitrate allocation
-3. No pipeline restart — latency is sub-second
+1. On a raise above the programmed rate (see above), the exposure cap moves and the
+   sensor is re-programmed
+2. VPE→VENC bind is torn down and re-established with `src_fps:dst_fps` ratio
+3. VENC rate control `fpsNum` is updated for correct bitrate allocation
+4. No pipeline restart — latency is sub-second
 
 **Mode switching limitation:** Changing sensor modes (e.g. 90fps→120fps) requires a full
 process restart. The SigmaStar kernel driver does not reliably reinitialize the MIPI PHY

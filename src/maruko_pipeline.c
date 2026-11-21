@@ -3889,6 +3889,7 @@ typedef struct {
 	i6c_venc_pack *cached_packs;
 	uint32_t cached_packs_cap;
 	unsigned int frame_counter;
+	unsigned int fps_kick_frame; /* delayed cold-boot kick, latched */
 	int venc_fd;
 	uint64_t last_activity_us;
 	uint64_t last_warn_us;
@@ -3900,13 +3901,38 @@ typedef struct {
 	(ctx)->cfg.rc_codec == PT_H265 && \
 	(ctx)->cfg.stream_mode == MARUKO_STREAM_RTP)
 
+static pthread_mutex_t g_sensor_fps_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int maruko_pipeline_set_sensor_fps(MarukoBackendContext *ctx, uint32_t fps)
+{
+	int ret;
+
+	pthread_mutex_lock(&g_sensor_fps_lock);
+	if (fps == 0)
+		fps = ctx->sensor.fps;
+	ret = fps ? MI_SNR_SetFps(ctx->sensor.pad_id, fps) : 0;
+	if (ret == 0) {
+		ctx->sensor.fps = fps;
+		/* SetFps can clobber orientation, as at the startup kick. */
+		if (ctx->cfg.image_mirror || ctx->cfg.image_flip)
+			(void)MI_SNR_SetOrien(ctx->sensor.pad_id,
+				(uint8_t)ctx->cfg.image_mirror,
+				(uint8_t)ctx->cfg.image_flip);
+	}
+	pthread_mutex_unlock(&g_sensor_fps_lock);
+	return ret;
+}
+
 static void maruko_pipeline_init_streaming(MarukoBackendContext *ctx,
 	MarukoStreamRuntime *rt)
 {
 	memset(rt, 0, sizeof(*rt));
+	rt->fps_kick_frame = ctx->sensor.fps;
 	if (ctx->cfg.stream_mode == MARUKO_STREAM_RTP) {
 		maruko_video_init_rtp_state(&rt->rtp_state, ctx->cfg.rc_codec,
 			ctx->sensor.fps);
+		__atomic_store_n(&ctx->rtp_frame_ticks,
+			rt->rtp_state.frame_ticks, __ATOMIC_RELAXED);
 		rtp_sidecar_sender_init(&rt->sidecar, ctx->cfg.sidecar_port);
 	}
 	if (ctx->cfg.verbose) {
@@ -4672,15 +4698,16 @@ static int maruko_pipeline_process_stream(MarukoBackendContext *ctx,
 	 * 89fps).  Re-kick MI_SNR_SetFps after ~1 second of frames to
 	 * force correct sensor timing.  Same fix as Star6E CUS3A
 	 * cold-boot FPS lock. */
-	if (rt->frame_counter == (unsigned int)ctx->sensor.fps) {
-		MI_SNR_SetFps(ctx->sensor.pad_id, ctx->sensor.fps);
+	if (rt->frame_counter == rt->fps_kick_frame) {
+		(void)maruko_pipeline_set_sensor_fps(ctx, 0);
 		printf("> [maruko] delayed FPS kick: pad %d fps %u "
 			"(cold-boot fix at frame %u)\n",
 			ctx->sensor.pad_id, ctx->sensor.fps, rt->frame_counter);
 	}
 
-	/* Orientation (image.flip / image.mirror) is applied once at bring-up
-	 * (sensor_select + maruko_start_vpe) and holds — no per-frame re-apply
+	/* Orientation (image.flip / image.mirror) is applied at bring-up
+	 * (sensor_select + maruko_start_vpe) and after every SetFps
+	 * (maruko_pipeline_set_sensor_fps) and holds — no per-frame re-apply
 	 * needed (IMX415 device-verified zero drift).  See star6e_runtime.c. */
 
 	/* Debug OSD overlay — Star6E parity (star6e_runtime.c:825-849). */
@@ -4920,6 +4947,9 @@ static int maruko_pipeline_process_stream(MarukoBackendContext *ctx,
 		 * skip breaks the H.265 reference chain (HISTORY 0.9.2). */
 		if (sidecar_subscribed)
 			maruko_output_observe_pressure(&ctx->output);
+		/* A live fps change rewrites the step. */
+		rt->rtp_state.frame_ticks = __atomic_load_n(
+			&ctx->rtp_frame_ticks, __ATOMIC_RELAXED);
 		total_bytes = maruko_video_send_frame(&stream, &ctx->output,
 			&rt->rtp_state, &rt->param_sets, &ctx->cfg,
 			MARUKO_PKTZR_VERBOSE_ACTIVE(ctx) ? &frame_pktzr : NULL);

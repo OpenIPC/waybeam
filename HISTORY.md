@@ -1,5 +1,34 @@
 # History
 
+## [0.87.5] - 2026-11-21
+
+Maruko: a live `video0.fps` raise above the rate venc started at now
+actually delivers it, and the RTP clock follows every live fps change.
+Star6E got the same fix in 0.87.3.
+
+- **The bug:** the live path clamped a raise to the rate the sensor was
+  programmed to at startup, so a camera started at 60 and set to 100 kept
+  sending 60. The video RTP step stayed at the startup rate in both
+  directions, so after 60 -> 30 the 90 kHz clock ran 2x slow.
+- **The fix:** the ceiling is the sensor mode's maximum. A raise re-programs
+  the sensor, exposure ceiling first. That covers both the ISP limit and
+  the AE thread's own auto ceiling, which used to put the startup period
+  back within a frame or two. The 180-degree pin follows the new rate, and
+  orientation is re-applied. The RTP step is re-derived on every delivered
+  rate change.
+- **Left alone:** a sensor whose startup rate was a fallback is never
+  raised, and neither is one carrying the dual stream (ch1 is bound off ch0)
+  or running `stab` / `stab-fill` framing (its per-frame detector is sized
+  for the start rate). After one refusal venc stays bind-only, which is what
+  delivered before. A failed apply puts the sensor back.
+- The live raise and the delayed cold-boot `SetFps` kick share one lock, and
+  the kick fires at a fixed frame. The kick now also re-applies mirror/flip,
+  as the init-time kick does.
+- Measured on an SSC378QE (sensor mode 1920x1080, max 100): 60 -> 100 -> 30
+  -> 100 delivered 60/100/30/100 pictures/s, and the RTP step went
+  1500/900/3000/900 in the same second. In a dim scene the AE ceiling held
+  10000 us after a raise to 100. With the 180-degree rule it pinned 5000 us.
+
 ## [0.87.4] - 2026-11-21
 
 Two fixes outside Star6E, found by checking the 0.87.x FEC and RTP work

@@ -57,6 +57,9 @@ void maruko_cus3a_set_gain_max(uint32_t gain);
 
 /** Update the max shutter (exposure) at runtime. */
 void maruko_cus3a_set_shutter_max(uint32_t us);
+/** The sensor rate the auto shutter ceiling (shutter_max_us 0) follows;
+ *  a live fps raise or rollback updates it. */
+void maruko_cus3a_set_sensor_fps(uint32_t fps);
 
 /** Update the min sensor gain floor at runtime. */
 void maruko_cus3a_set_gain_min(uint32_t gain);
