@@ -14,12 +14,24 @@ Maruko: three exposure and timing fixes.
   Infinity6C 5.10.61 kernel; this needs the `.ko` deployed and a reboot.
   Measured on an SSC378QE with an IMX335 in mode 1920x1080 at 100: the limit
   at 30 fps went from 10000 to 33333 us (16666 with the rule), still at 30
-  pictures/s, and two cold boots at 100 fps still delivered 100.
-- **A live ISP-bin reload re-caps exposure and re-kicks the sensor rate,** as
-  Star6E does after a bin load. Before, the cap came back only on the AE
-  thread's next tick, and never with that thread off (`isp.aeFps=0`). The one
-  IMX335 bin on the bench does not reset the AE limit, so this one is not
-  reproduced on a device.
+  pictures/s, and two cold boots at 100 fps still delivered 100. The IMX415
+  driver gets the same change but was not measured.
+  - **What venc's cap now carries:** these drivers lengthen the frame for a
+    shutter longer than it (IMX415 without a bound, IMX335 up to 120 %), which
+    the old range could not ask for. venc caps exposure at the running rate,
+    so this only matters where that cap is not in force. An explicit
+    `isp.shutterMaxUs` longer than the frame period, which the driver used to
+    clamp silently, is now honoured and can lower the frame rate.
+  - The delayed cold-boot SetFps kick re-applies the cap first. The ISP's AE
+    init can reset the limits after the startup cap, and with `isp.aeFps=0`
+    no thread puts it back. Not reproduced on the bench: there the limit held
+    at 10000 us at 100 fps with `aeFps=0` with or without this.
+- **A live ISP-bin reload re-caps exposure.** Before, the cap came back only
+  on the AE thread's next tick, and never with that thread off
+  (`isp.aeFps=0`). Unlike Star6E there is no SetFps kick after the load: on
+  IMX335 a kick while the bin's long shutter is still set keeps the
+  stretched frame length. The one IMX335 bin on the bench does not reset the
+  AE limit, so this is not reproduced on a device.
 - **The dual-stream ch1 RTP clock runs at ch1's rate.** It was seeded with
   the sensor rate while ch1 delivers `record.fps`: measured 30 pictures/s with
   a 900 step (the 90 kHz clock 3.3x slow); now 3000.

@@ -1607,19 +1607,19 @@ static int maruko_apply_pause_stab(bool paused)
 	return maruko_pipeline_set_pause_stab(paused);
 }
 
-/* A bin brings its own AE limits and can write its cold-boot shutter to the
- * sensor, so re-cap exposure for the running rate and re-kick SetFps (which
- * re-applies orientation), as Star6E does after its bin load.  Without this
- * the cap came back only on the AE thread's next tick, and never with that
- * thread off (isp.aeFps=0). */
+/* A bin brings its own AE limits, so re-cap exposure for the running rate.
+ * Without this the cap came back only on the AE thread's next tick, and
+ * never with that thread off (isp.aeFps=0).  No SetFps kick here (Star6E
+ * kicks): on IMX335 a kick while the bin's long shutter is still set keeps
+ * the stretched frame length. */
 static int maruko_apply_isp_bin(const char *path)
 {
 	MarukoBackendContext *b = g_ctx.backend;
 
 	if (!b || maruko_pipeline_load_isp_bin_live(b, path) != 0)
 		return -1;
-	cap_exposure_for_fps(b->sensor.fps, b->cfg.shutter_rule_180);
-	(void)maruko_pipeline_set_sensor_fps(b, 0);
+	if (b->sensor.fps)
+		cap_exposure_for_fps(b->sensor.fps, b->cfg.shutter_rule_180);
 	return 0;
 }
 

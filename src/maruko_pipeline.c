@@ -4702,6 +4702,13 @@ static int maruko_pipeline_process_stream(MarukoBackendContext *ctx,
 	 * force correct sensor timing.  Same fix as Star6E CUS3A
 	 * cold-boot FPS lock. */
 	if (rt->frame_counter == rt->fps_kick_frame) {
+		/* The cap again first: the ISP's AE init resets the limits to
+		 * the bin's after the startup cap, and with isp.aeFps=0 no
+		 * thread re-applies it.  The driver allows shutters down to
+		 * the mode's slowest rate, so an uncapped AE can stretch the
+		 * frame, and a kick under a long shutter can keep it. */
+		(void)pipeline_common_cap_exposure_for_fps(ctx->sensor.fps,
+			ctx->cfg.shutter_rule_180);
 		(void)maruko_pipeline_set_sensor_fps(ctx, 0);
 		printf("> [maruko] delayed FPS kick: pad %d fps %u "
 			"(cold-boot fix at frame %u)\n",
