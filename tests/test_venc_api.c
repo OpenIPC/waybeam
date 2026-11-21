@@ -2295,8 +2295,8 @@ static int test_outgoing_fec_validation(void)
 		venc_api_field_supported_for_backend("star6e", "outgoing.fec") == 1);
 	CHECK("fec unsupported maruko",
 		venc_api_field_supported_for_backend("maruko", "outgoing.fec") == 0);
-	CHECK("fec unsupported cv610",
-		venc_api_field_supported_for_backend("cv610", "outgoing.fec") == 0);
+	CHECK("fec supported cv610",
+		venc_api_field_supported_for_backend("cv610", "outgoing.fec") == 1);
 	CHECK("fec video share 8000 -> 6400", venc_fec_video_kbps(1, 8000) == 6400);
 	CHECK("fec off keeps the total", venc_fec_video_kbps(0, 8000) == 8000);
 	CHECK("fec payload: nothing learned -> 1400",
@@ -2307,6 +2307,12 @@ static int test_outgoing_fec_validation(void)
 		venc_fec_payload_size(3780, 4694) == 3780);
 	CHECK("fec payload: never above a low ceiling",
 		venc_fec_payload_size(1200, 2000) == 1200);
+	CHECK("fec slice avg: first frame seeds it",
+		venc_fec_slice_avg(0, 4, 4000) == 1000);
+	CHECK("fec slice avg: 1/8 towards the new mean",
+		venc_fec_slice_avg(1000, 2, 4000) == 1125);
+	CHECK("fec slice avg: no slices keeps it",
+		venc_fec_slice_avg(1000, 0, 0) == 1000);
 	return failures;
 }
 
@@ -2321,50 +2327,63 @@ static int test_apply_fec(bool on)
 }
 
 /* outgoing.fec is live, and its rule runs on the whole staged request, so
- * the order of keys inside one request does not matter. */
+ * the order of keys inside one request does not matter.  Star6E and CV610
+ * send parity, and the rules are the same on both. */
 static int test_outgoing_fec_live(void)
 {
+	static const char *const backends[] = { "star6e", "cv610" };
 	VencConfig cfg;
 	VencApplyCallbacks cb;
 	int failures = 0, status = 0;
 	char response[1024];
 
-	venc_config_defaults(&cfg);
-	cfg.outgoing.max_payload_size = 1500;
-	memset(&cb, 0, sizeof(cb));
-	cb.apply_max_payload_size = test_apply_max_payload;
-	cb.apply_fec = test_apply_fec;
-	g_fec_calls = 0;
+	for (size_t i = 0; i < sizeof(backends) / sizeof(backends[0]); i++) {
+		const char *const be = backends[i];
 
-	CHECK("fec live: fec first, payload second, accepted",
-		apply_set_query_http(&cfg, "star6e", &cb,
-			"outgoing.fec=true&outgoing.maxPayloadSize=1400", &status,
-			response, sizeof(response)) == 0 && status == 200 &&
-		g_fec_calls == 1 && g_fec_last && cfg.outgoing.fec);
-	CHECK("fec live: payload past 3780 with fec on rejected",
-		apply_set_query_http(&cfg, "star6e", &cb,
-			"outgoing.maxPayloadSize=3781", &status, response,
-			sizeof(response)) == 0 && status == 409 &&
-		cfg.outgoing.max_payload_size == 1400);
-	CHECK("fec live: off",
-		apply_set_query_http(&cfg, "star6e", &cb, "outgoing.fec=false",
-			&status, response, sizeof(response)) == 0 &&
-		status == 200 && g_fec_calls == 2 && !g_fec_last &&
-		!cfg.outgoing.fec);
-	cb.apply_fec = NULL;
-	CHECK("fec live: no callback -> 501, unchanged",
-		apply_set_query_http(&cfg, "star6e", &cb, "outgoing.fec=true",
-			&status, response, sizeof(response)) == 0 &&
-		status == 501 && !cfg.outgoing.fec);
+		venc_config_defaults(&cfg);
+		cfg.outgoing.max_payload_size = 1500;
+		memset(&cb, 0, sizeof(cb));
+		cb.apply_max_payload_size = test_apply_max_payload;
+		cb.apply_fec = test_apply_fec;
+		g_fec_calls = 0;
+
+		CHECK("fec live: fec first, payload second, accepted",
+			apply_set_query_http(&cfg, be, &cb,
+				"outgoing.fec=true&outgoing.maxPayloadSize=1400",
+				&status, response, sizeof(response)) == 0 &&
+			status == 200 && g_fec_calls == 1 && g_fec_last &&
+			cfg.outgoing.fec);
+		CHECK("fec live: payload past 3780 with fec on rejected",
+			apply_set_query_http(&cfg, be, &cb,
+				"outgoing.maxPayloadSize=3781", &status, response,
+				sizeof(response)) == 0 && status == 409 &&
+			cfg.outgoing.max_payload_size == 1400);
+		CHECK("fec live: frame-shm server with fec on rejected",
+			apply_set_query_http(&cfg, be, &cb,
+				"outgoing.server=frame-shm://x", &status, response,
+				sizeof(response)) == 0 && status == 409 &&
+			strncmp(cfg.outgoing.server, "frame-shm", 9) != 0);
+		CHECK("fec live: off",
+			apply_set_query_http(&cfg, be, &cb, "outgoing.fec=false",
+				&status, response, sizeof(response)) == 0 &&
+			status == 200 && g_fec_calls == 2 && !g_fec_last &&
+			!cfg.outgoing.fec);
+		cb.apply_fec = NULL;
+		CHECK("fec live: no callback -> 501, unchanged",
+			apply_set_query_http(&cfg, be, &cb, "outgoing.fec=true",
+				&status, response, sizeof(response)) == 0 &&
+			status == 501 && !cfg.outgoing.fec);
+		venc_api_clear_reinit();
+	}
 	return failures;
 }
 
-/* A backend without parity ignores outgoing.fec, so a stray fec:true (a
- * config copied from a Star6E camera) must not block its other outgoing
- * keys -- and Star6E keeps the rule (the control above). */
+/* A backend without parity (Maruko) ignores outgoing.fec, so a stray
+ * fec:true (a config copied from another camera) must not block its other
+ * outgoing keys -- and the parity backends keep the rule (the test above). */
 static int test_outgoing_fec_stray_on_other_backends(void)
 {
-	static const char *const backends[] = { "maruko", "cv610" };
+	static const char *const backends[] = { "maruko" };
 	VencConfig cfg;
 	VencApplyCallbacks cb;
 	int failures = 0, status = 0;

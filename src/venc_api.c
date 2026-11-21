@@ -1031,6 +1031,9 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 			"outgoing.max_payload_size", "outgoing.audio_port",
 			"outgoing.connected_udp",
 			"outgoing.allow_unix_encoder_stall",
+			/* RS parity after each frame, live through
+			 * cv610_apply_fec() (protocols/venc-fec.md). */
+			"outgoing.fec",
 			/* Read once by cv610_output_start(), which binds the
 			 * sidecar listener before the transport dispatch.  The
 			 * shared table already marks it MUT_RESTART, so there is
@@ -1112,8 +1115,8 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 	    strcmp(canonical_key, "isp.awb_fps") == 0)
 		return 0;
 
-	/* RS parity is built in the Star6E output batch only; the Maruko
-	 * sender has none (protocols/venc-fec.md). */
+	/* RS parity is sent by Star6E and CV610 only; the Maruko sender has
+	 * none (protocols/venc-fec.md). */
 	if (backend_name && strcmp(backend_name, "maruko") == 0 &&
 	    strcmp(canonical_key, "outgoing.fec") == 0)
 		return 0;

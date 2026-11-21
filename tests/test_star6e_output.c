@@ -378,8 +378,8 @@ static int fec_check_parity(uint8_t (*pkts)[1500], const ssize_t *lens,
 	int n, unsigned k_total, uint16_t base, size_t (*len_of)(unsigned),
 	unsigned *ks)
 {
-	static uint8_t sym[STAR6E_FEC_BLOCK_MAX][STAR6E_FEC_SYM_MAX];
-	uint8_t want[STAR6E_FEC_SYM_MAX];
+	static uint8_t sym[VENC_FEC_BLOCK_MAX][VENC_FEC_SYM_MAX];
+	uint8_t want[VENC_FEC_SYM_MAX];
 	int parity = 0, nblocks = 0;
 	int last_base = -1;
 
@@ -390,9 +390,9 @@ static int fec_check_parity(uint8_t (*pkts)[1500], const ssize_t *lens,
 		const unsigned first = (uint16_t)(bseq - base);
 		size_t maxlen = 0;
 
-		if ((d[1] & 0x7F) != STAR6E_FEC_PT || d[12] != 0x7E ||
-		    (d[13] & 0xC7) != 0x01 || k == 0 || k > STAR6E_FEC_BLOCK_MAX ||
-		    rd_u32(d + 8) != (0x12345678u ^ STAR6E_FEC_SSRC_XOR) ||
+		if ((d[1] & 0x7F) != VENC_FEC_PT || d[12] != 0x7E ||
+		    (d[13] & 0xC7) != 0x01 || k == 0 || k > VENC_FEC_BLOCK_MAX ||
+		    rd_u32(d + 8) != (0x12345678u ^ VENC_FEC_SSRC_XOR) ||
 		    rd_u32(d + 4) != 0x00001000u || lens[p] > 1420 ||
 		    (d[1] & 0x80))
 			return -1;
@@ -416,8 +416,8 @@ static int fec_check_parity(uint8_t (*pkts)[1500], const ssize_t *lens,
 				sym[i][2 + j] = fec_byte(seq, j);
 		}
 		rs_fec_encode(k, idx, sym[0], sizeof(sym[0]), 2 + maxlen, want);
-		if (lens[p] != (ssize_t)(12 + STAR6E_FEC_HDR + 2 + maxlen) ||
-		    memcmp(d + 12 + STAR6E_FEC_HDR, want, 2 + maxlen) != 0)
+		if (lens[p] != (ssize_t)(12 + VENC_FEC_HDR + 2 + maxlen) ||
+		    memcmp(d + 12 + VENC_FEC_HDR, want, 2 + maxlen) != 0)
 			return -1;
 		parity++;
 	}
@@ -478,7 +478,7 @@ static int test_star6e_output_fec(void)
 		par_bytes * 1000 >= src_bytes * 240 &&
 		par_bytes * 1000 <= src_bytes * 260);
 	CHECK("fec counters move",
-		output.fec_parity_pkts > 0 && output.fec_unprotected > 0);
+		output.fec.parity_pkts > 0 && output.fec.unprotected > 0);
 	star6e_output_teardown(&output);
 	close(rx);
 	return failures;
@@ -496,7 +496,7 @@ static void fec_hook_no_budget(Star6eOutput *output)
 }
 
 /* Live outgoing.fec: a toggle takes effect at the next frame and never
- * splits one; a frame past STAR6E_FEC_MAX_SRC keeps its first 256 protected
+ * splits one; a frame past VENC_FEC_MAX_SRC keeps its first 256 protected
  * with no E; a frame whose video flush gave up gets no parity. */
 static int test_star6e_output_fec_live(void)
 {
@@ -508,9 +508,9 @@ static int test_star6e_output_fec_live(void)
 	uint16_t seq = 100;
 
 	CHECK("fec live: init off", fec_open(&output, 0, &rx) == 0 &&
-		!output.fec_arena);
+		!output.fec.arena);
 	CHECK("fec live: enable", star6e_output_set_fec(&output, 1) == 0 &&
-		output.fec_arena);
+		output.fec.arena);
 	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
 	CHECK("fec live: parity from the next frame",
 		fec_check_parity(pkts, lens, n, 12, seq, fec_len_mixed, NULL) >= 1);
@@ -527,41 +527,41 @@ static int test_star6e_output_fec_live(void)
 	seq = (uint16_t)(seq + 12);
 
 	CHECK("fec live: re-enable keeps the arena",
-		star6e_output_set_fec(&output, 1) == 0 && output.fec_arena);
-	unprot = output.fec_unprotected;
+		star6e_output_set_fec(&output, 1) == 0 && output.fec.arena);
+	unprot = output.fec.unprotected;
 	n = fec_send_frame(&output, rx, seq, 300, fec_len_600, pkts, lens, 400);
 	CHECK("fec live: 300 sources, first 256 protected, no E",
 		n > 300 && fec_check_parity(pkts, lens, n, 300, seq, fec_len_600,
-		NULL) >= 7 && output.fec_unprotected - unprot == 300 - 256);
+		NULL) >= 7 && output.fec.unprotected - unprot == 300 - 256);
 	seq = (uint16_t)(seq + 300);
 
-	par = output.fec_parity_pkts;
+	par = output.fec.parity_pkts;
 	drops = output.socket_drops;
-	unprot = output.fec_unprotected;
+	unprot = output.fec.unprotected;
 	g_fec_hook = fec_hook_give_up;
 	g_fec_hook_at = 6;
 	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
 	/* The give-up also drops the 6 still queued: nothing reaches rx. */
 	CHECK("fec live: no parity after the video flush gave up",
-		n == 0 && output.fec_parity_pkts == par &&
+		n == 0 && output.fec.parity_pkts == par &&
 		output.socket_drops - drops == 12 && /* video only */
-		output.fec_unprotected == unprot); /* refused, not unprotected */
+		output.fec.unprotected == unprot); /* refused, not unprotected */
 	seq = (uint16_t)(seq + 12);
-	unprot = output.fec_unprotected;
+	unprot = output.fec.unprotected;
 	g_fec_hook = fec_hook_no_budget;
 	g_fec_hook_at = 0;
 	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
 	CHECK("fec live: budget spent, video whole -> 12 unprotected, no parity",
-		n == 12 && output.fec_unprotected - unprot == 12);
+		n == 12 && output.fec.unprotected - unprot == 12);
 	seq = (uint16_t)(seq + 12);
-	par = output.fec_parity_pkts;
+	par = output.fec.parity_pkts;
 	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
 	CHECK("fec live: parity counted as sent",
-		n > 12 && output.fec_parity_pkts - par == (uint32_t)(n - 12));
+		n > 12 && output.fec.parity_pkts - par == (uint32_t)(n - 12));
 
 	star6e_output_teardown(&output);
 	CHECK("fec live: teardown clears the flag",
-		!output.fec_on && !output.fec_arena);
+		!output.fec.on && !output.fec.arena);
 	close(rx);
 	return failures;
 }

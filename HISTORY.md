@@ -1,5 +1,30 @@
 # History
 
+## [0.88.0] - 2026-11-21
+
+CV610: RS parity (`outgoing.fec`), the same as Star6E, for flying the CV610
+on a radio link whose ground recovers it. Contract 0.35.0 (additive).
+
+- **Same wire, same code:** the parity producer moved out of the Star6E
+  output into `src/venc_fec.c`, and both backends use it. PT 100, its own
+  SSRC and sequence space, 25 % of the video by bytes, blocks of at most 40.
+- **Same rules:** live on and off at a frame boundary (on CV610 the rate
+  re-split costs no keyframe), `video0.bitrate` is the wire total (the
+  encoder gets 4/5), `udp://` or `unix://` RTP only, and
+  `maxPayloadSize` at most 3780. With it on, the RTP payload size is derived
+  from the slice size, as on Star6E.
+- **Load rule:** a CV610 config file pairing `fec:true` with a `frame-shm://`
+  server (CV610's usual transport) or `maxPayloadSize` above 3780 no longer
+  loads, as on Star6E. In 0.87.4-0.87.x CV610 ignored the key.
+- A frame that lost a packet to the socket (`EAGAIN`, or a hard failure)
+  gets no parity, as on Star6E: the queue is already full.
+- **Upgrade note:** a CV610 fleet whose configs were copied from a Star6E
+  camera with `fec:true` but run `frame-shm://` will not start on 0.88.0
+  (no video and no HTTP) until `fec` is set false in the file.
+- `GET /api/v1/transport/status` on CV610 `udp://` / `unix://` gains
+  `fecParityPkts`, `fecUnprotected` and `rtpPayload`; `packetsSent` includes
+  parity, as on Star6E.
+
 ## [0.87.5] - 2026-11-21
 
 Maruko: a live `video0.fps` raise above the rate venc started at now

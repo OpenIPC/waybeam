@@ -94,7 +94,7 @@ size_t star6e_video_send_frame(Star6eVideoState *state,
 
 	if (output_enabled) {
 		const uint16_t payload =
-			__atomic_load_n(&output->fec_on, __ATOMIC_RELAXED) ?
+			__atomic_load_n(&output->fec.on, __ATOMIC_RELAXED) ?
 			venc_fec_payload_size(state->rtp_payload_size,
 				state->slice_avg) : state->rtp_payload_size;
 		Star6eRtpFrameContext rtp_frame = {
@@ -133,14 +133,8 @@ size_t star6e_video_send_frame(Star6eVideoState *state,
 		if (frame_packetizer.rtp_packets) /* not frame-shm, compact, dropped AU */
 			__atomic_store_n(&state->payload_used, payload,
 				__ATOMIC_RELAXED);
-		if (frame_packetizer.slices) {
-			const uint32_t mean = frame_packetizer.slice_bytes /
-				frame_packetizer.slices;
-
-			/* EWMA 1/8: follows the scene, not one frame. */
-			state->slice_avg = state->slice_avg ?
-				(state->slice_avg * 7 + mean) / 8 : mean;
-		}
+		state->slice_avg = venc_fec_slice_avg(state->slice_avg,
+			frame_packetizer.slices, frame_packetizer.slice_bytes);
 
 		if (sidecar_active) {
 			RtpSidecarTransportInfo tinfo;
