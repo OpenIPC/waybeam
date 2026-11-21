@@ -529,12 +529,17 @@ static int program_sensor_fps(uint32_t fps)
 	const VencConfig *vcfg = g_star6e_control_ctx.vcfg;
 	const int rule_180 = vcfg && vcfg->isp.shutter_rule_180;
 	const uint32_t prev = ps->sensor.fps;
+	const int lower = fps < prev; /* a rollback: cap after the rate drops */
 
-	(void)star6e_pipeline_cap_exposure_for_fps(fps, rule_180);
+	if (!lower)
+		(void)star6e_pipeline_cap_exposure_for_fps(fps, rule_180);
 	if (star6e_pipeline_set_sensor_fps(ps, fps) != 0) {
-		(void)star6e_pipeline_cap_exposure_for_fps(prev, rule_180);
+		if (!lower)
+			(void)star6e_pipeline_cap_exposure_for_fps(prev, rule_180);
 		return -1;
 	}
+	if (lower)
+		(void)star6e_pipeline_cap_exposure_for_fps(fps, rule_180);
 	if (rule_180 && star6e_cus3a_running())
 		star6e_cus3a_set_shutter_max(1000000 / (fps * 2));
 	/* SetFps can reset the orientation registers on some sensors. */
@@ -586,17 +591,24 @@ static void set_delivered_fps(uint32_t fps)
 			rtp_session_frame_ticks(fps), __ATOMIC_RELAXED);
 }
 
-/* A failed apply rolls the config back, so the sensor too.  The bind is
- * back at mode_max:mode_max, which delivers what the sensor runs at; a
- * fallback rate is not trusted (fixed-timing modes run at their own). */
-static void fps_apply_failed(uint32_t raised_from, uint32_t mode_max)
+/* The rate the sensor runs at, as far as venc knows it: the programmed
+ * rate, or mode_max when unknown or a fallback (fixed-timing modes run at
+ * their own).  The bind can deliver no more. */
+static uint32_t sensor_running_fps(uint32_t mode_max)
 {
 	const Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
 
+	return ps && ps->sensor.fps && !ps->sensor.fps_fallback &&
+		ps->sensor.fps < mode_max ? ps->sensor.fps : mode_max;
+}
+
+/* A failed apply rolls the config back, so the sensor too; the bind is
+ * back at mode_max:mode_max. */
+static void fps_apply_failed(uint32_t raised_from, uint32_t mode_max)
+{
 	if (raised_from)
 		(void)program_sensor_fps(raised_from);
-	set_delivered_fps(ps && ps->sensor.fps && !ps->sensor.fps_fallback &&
-		ps->sensor.fps < mode_max ? ps->sensor.fps : mode_max);
+	set_delivered_fps(sensor_running_fps(mode_max));
 }
 
 static int apply_fps(uint32_t fps)
@@ -619,6 +631,10 @@ static int apply_fps(uint32_t fps)
 		fps = sensor_fps;
 	}
 	raised_from = raise_sensor_fps(fps);
+	/* A refused raise stays bind-only: deliver, clock and budget what the
+	 * sensor really runs. */
+	if (fps > sensor_running_fps(sensor_fps))
+		fps = sensor_running_fps(sensor_fps);
 	if (fps == g_star6e_control_ctx.delivered_fps)
 		return 0;
 	/* Decouple delivery from rate control: the VPE->VENC bind DELIVERS the
