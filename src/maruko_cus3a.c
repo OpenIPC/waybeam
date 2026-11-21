@@ -120,8 +120,11 @@ static uint32_t compute_max_shutter(const Cus3aState *s)
 {
 	if (s->shutter_max_us > 0)
 		return s->shutter_max_us;
-	if (s->cfg.sensor_fps > 0)
-		return 1000000 / s->cfg.sensor_fps;
+	const uint32_t fps = __atomic_load_n(&s->cfg.sensor_fps,
+		__ATOMIC_RELAXED);
+
+	if (fps > 0)
+		return 1000000 / fps;
 	return 8333;  /* fallback ~120fps */
 }
 
@@ -508,6 +511,11 @@ void maruko_cus3a_set_gain_max(uint32_t gain)
 void maruko_cus3a_set_shutter_max(uint32_t us)
 {
 	g_cus3a.shutter_max_us = us;
+}
+
+void maruko_cus3a_set_sensor_fps(uint32_t fps)
+{
+	__atomic_store_n(&g_cus3a.cfg.sensor_fps, fps, __ATOMIC_RELAXED);
 }
 
 void maruko_cus3a_set_gain_min(uint32_t gain)

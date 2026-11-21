@@ -13,6 +13,7 @@
 #include "maruko_pipeline.h"
 #include "output_socket.h"
 #include "pipeline_common.h"
+#include "rtp_session.h"
 #include "venc_config.h"
 #include "venc_api.h"
 #include "venc_jpeg.h"
@@ -403,11 +404,90 @@ static int maruko_request_idr(void);
 static int maruko_request_idr_bootstrap(void);
 static uint32_t maruko_query_live_fps(void);
 
+/* The sensor delivers the rate it was last PROGRAMMED to (startup:
+ * video0.fps), not the mode max, and the SCL->VENC bind can only drop
+ * frames, so a live raise above it re-programs the sensor (Star6E parity,
+ * apply_fps() in src/star6e_controls.c).  When raising, the exposure cap and
+ * the AE thread's auto ceiling move first, so AE never holds a shutter
+ * longer than the new period; when lowering (a rollback), after.  The
+ * 180-degree pin follows the new rate. */
+static int program_sensor_fps(uint32_t fps)
+{
+	MarukoBackendContext *b = g_ctx.backend;
+	const bool rule_180 = b->cfg.shutter_rule_180;
+	const uint32_t prev = b->sensor.fps;
+	const int lower = fps < prev;
+
+	if (!lower) {
+		(void)pipeline_common_cap_exposure_for_fps(fps, rule_180);
+		maruko_cus3a_set_sensor_fps(fps);
+	}
+	if (maruko_pipeline_set_sensor_fps(b, fps) != 0) {
+		if (!lower) {
+			(void)pipeline_common_cap_exposure_for_fps(prev, rule_180);
+			maruko_cus3a_set_sensor_fps(prev);
+		}
+		return -1;
+	}
+	if (lower) {
+		(void)pipeline_common_cap_exposure_for_fps(fps, rule_180);
+		maruko_cus3a_set_sensor_fps(fps);
+	}
+	if (rule_180)
+		maruko_cus3a_set_shutter_max(1000000 / (fps * 2));
+	g_ctx.sensor_fps = fps;
+	fprintf(stderr, "> [maruko] Sensor fps %u -> %u, max shutter %uus%s\n",
+		prev, fps, 1000000 / (fps * (rule_180 ? 2 : 1)),
+		rule_180 ? " (180-degree rule, pinned)" : "");
+	return 0;
+}
+
+/* Raise the sensor for a live fps above its programmed rate.  Never on a
+ * startup fallback rate (fixed-timing modes refuse SetFps), never while the
+ * dual stream is up (ch1 is bound off ch0 at sensor:fps), and after one
+ * refusal bind-only from then on, which is what delivered before.  Returns
+ * the rate before the call, for a rollback (0 = untouched). */
+static uint32_t raise_sensor_fps(uint32_t fps)
+{
+	static int refused;
+	MarukoBackendContext *b = g_ctx.backend;
+	uint32_t prev;
+
+	if (!b || refused || b->dual || b->sensor.fps_fallback ||
+	    b->sensor.fps == 0 || fps <= b->sensor.fps)
+		return 0;
+	prev = b->sensor.fps;
+	if (program_sensor_fps(fps) != 0) {
+		refused = 1;
+		fprintf(stderr, "> [maruko] Sensor refused %u fps; staying at "
+			"%u, bind-only\n", fps, prev);
+		return 0;
+	}
+	return prev;
+}
+
+/* The video RTP step follows the delivered rate (90 kHz / fps). */
+static void set_delivered_fps(uint32_t fps)
+{
+	if (g_ctx.backend && fps)
+		__atomic_store_n(&g_ctx.backend->rtp_frame_ticks,
+			rtp_session_frame_ticks(fps), __ATOMIC_RELAXED);
+}
+
+/* A failed apply rolls the config back, so the sensor too; the bind is
+ * back at sensor:sensor. */
+static void fps_apply_failed(uint32_t raised_from)
+{
+	if (raised_from)
+		(void)program_sensor_fps(raised_from);
+	set_delivered_fps(g_ctx.sensor_fps);
+}
+
 static int maruko_apply_fps(uint32_t fps)
 {
 	i6c_venc_chn attr = {0};
 	MI_S32 bind_ret;
-	uint32_t sensor_fps;
+	uint32_t sensor_fps, mode_max, raised_from;
 	int rebound = 0;
 
 	if (fps == 0 || fps > PIPELINE_LIVE_FPS_MAX)
@@ -416,12 +496,19 @@ static int maruko_apply_fps(uint32_t fps)
 	/* A request above the current mode's max is clamped for the rebind (see
 	 * PIPELINE_LIVE_FPS_MAX) — the caller's config still holds the requested
 	 * value so a later respawn can select a higher-fps sensor mode for it. */
-	sensor_fps = g_ctx.sensor_fps;
-	if (fps > sensor_fps) {
+	mode_max = g_ctx.backend && g_ctx.backend->sensor.mode.maxFps ?
+		g_ctx.backend->sensor.mode.maxFps : g_ctx.sensor_fps;
+	if (fps > mode_max) {
 		printf("> FPS %u exceeds sensor mode max %u, clamping\n", fps,
-			sensor_fps);
-		fps = sensor_fps;
+			mode_max);
+		fps = mode_max;
 	}
+	raised_from = raise_sensor_fps(fps);
+	/* A refused raise stays bind-only: deliver, clock and budget what the
+	 * sensor really runs. */
+	sensor_fps = g_ctx.sensor_fps;
+	if (fps > sensor_fps)
+		fps = sensor_fps;
 	if (fps == maruko_query_live_fps())
 		return 0;
 
@@ -434,6 +521,7 @@ static int maruko_apply_fps(uint32_t fps)
 	if (maruko_framing_fill_graph_ready()) {
 		if (maruko_framing_stab_fill_set_fps(sensor_fps, fps) != 0) {
 			printf("> FPS %u: fill FRC update failed\n", fps);
+			fps_apply_failed(raised_from);
 			return -1;
 		}
 	} else
@@ -449,6 +537,7 @@ static int maruko_apply_fps(uint32_t fps)
 			MI_SYS_BindChnPort2(&g_ctx.vpe_port,
 				&g_ctx.venc_port, sensor_fps, sensor_fps,
 				I6_SYS_LINK_RING, 0);
+			fps_apply_failed(raised_from);
 			return -1;
 		}
 	}
@@ -459,6 +548,7 @@ static int maruko_apply_fps(uint32_t fps)
 	 * one we enumerate -- so a caller must NOT infer "did it change?"
 	 * by diffing fpsNum.  Report it in the return value instead. */
 	rebound = 1;
+	set_delivered_fps(fps);
 	if (maruko_mi_venc_get_chn_attr(g_ctx.venc_dev,
 	    g_ctx.venc_chn, &attr) == 0) {
 		switch (attr.rate.mode) {
@@ -484,7 +574,8 @@ static int maruko_apply_fps(uint32_t fps)
 	/* No IDR here — see apply_fps() in src/star6e_controls.c.  Only the
 	 * live video0.fps write needs one; it is issued in
 	 * maruko_apply_fps_live(). */
-	printf("> FPS changed to %u (bind %u:%u)\n", fps, sensor_fps, fps);
+	fprintf(stderr, "> FPS changed to %u (bind %u:%u)\n", fps, sensor_fps,
+		fps);
 	/* 1 = the encoder was rebound, 0 = nothing to do, -1 = failed.
 	 * Callers that only care about failure keep testing < 0. */
 	return rebound;

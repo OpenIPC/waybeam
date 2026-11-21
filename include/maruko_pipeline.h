@@ -48,6 +48,7 @@ typedef struct {
   FrameGate frame_gate;
   volatile sig_atomic_t output_enabled;
   volatile uint32_t stored_fps;
+  uint32_t rtp_frame_ticks;  /* video RTP step; live fps rewrites it */
   MI_VENC_DEV venc_device;
   MI_VENC_CHN venc_channel;
   MI_SYS_ChnPort_t vif_port;
@@ -125,6 +126,10 @@ int maruko_pipeline_configure_graph(MarukoBackendContext *ctx);
 /** Run the encoding loop (blocks until shutdown signal).
  *  Returns 0 for clean exit, 1 for reinit requested, -1 for error. */
 int maruko_pipeline_run(MarukoBackendContext *ctx);
+/* Run-time MI_SNR_SetFps under one lock (live raise vs the delayed
+ * cold-boot kick), re-applying orientation; records the rate on success.
+ * fps 0 re-kicks the current rate. */
+int maruko_pipeline_set_sensor_fps(MarukoBackendContext *ctx, uint32_t fps);
 
 /** Tear down the pipeline graph only (keep httpd and MI_SYS alive). */
 void maruko_pipeline_teardown_graph(MarukoBackendContext *ctx);
