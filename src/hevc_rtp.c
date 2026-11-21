@@ -92,6 +92,8 @@ size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 	const int annexb = h26x_util_annexb_next(data, len, &cursor, &nal,
 		&nal_len);
 
+	if (max_payload <= 3) /* the packetizer refuses it too */
+		return 0;
 	if (!annexb) {
 		/* No start code: one raw NAL (a raw NAL cannot contain one). */
 		nal = data;
