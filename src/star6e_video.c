@@ -94,7 +94,7 @@ size_t star6e_video_send_frame(Star6eVideoState *state,
 
 	if (output_enabled) {
 		const uint16_t payload =
-			__atomic_load_n(&output->fec_on, __ATOMIC_RELAXED) ?
+			__atomic_load_n(&output->fec.on, __ATOMIC_RELAXED) ?
 			venc_fec_payload_size(state->rtp_payload_size,
 				state->slice_avg) : state->rtp_payload_size;
 		Star6eRtpFrameContext rtp_frame = {

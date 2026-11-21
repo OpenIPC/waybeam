@@ -322,7 +322,7 @@ static int program_bitrate(uint32_t kbps, int fec)
 static int apply_bitrate(uint32_t kbps)
 {
 	return program_bitrate(kbps, g_star6e_control_ctx.pipeline &&
-		__atomic_load_n(&g_star6e_control_ctx.pipeline->output.fec_on,
+		__atomic_load_n(&g_star6e_control_ctx.pipeline->output.fec.on,
 			__ATOMIC_RELAXED));
 }
 
@@ -1649,7 +1649,7 @@ static int apply_fec(bool on)
 
 	if (!ps || !g_star6e_control_ctx.vcfg)
 		return -1;
-	if (__atomic_load_n(&ps->output.fec_on, __ATOMIC_RELAXED) == (int)on)
+	if (__atomic_load_n(&ps->output.fec.on, __ATOMIC_RELAXED) == (int)on)
 		return 0;
 	total = g_star6e_control_ctx.vcfg->video0.bitrate;
 	if (on && program_bitrate(total, 1) != 0)
@@ -1825,9 +1825,9 @@ static char *query_transport_status(void)
 				__ATOMIC_RELAXED),
 			(unsigned)__atomic_load_n(&ps->output.socket_writes,
 				__ATOMIC_RELAXED),
-			(unsigned)__atomic_load_n(&ps->output.fec_parity_pkts,
+			(unsigned)__atomic_load_n(&ps->output.fec.parity_pkts,
 				__ATOMIC_RELAXED),
-			(unsigned)__atomic_load_n(&ps->output.fec_unprotected,
+			(unsigned)__atomic_load_n(&ps->output.fec.unprotected,
 				__ATOMIC_RELAXED),
 			(unsigned)__atomic_load_n(&ps->video.payload_used,
 				__ATOMIC_RELAXED),
