@@ -542,7 +542,9 @@ static int program_sensor_fps(uint32_t fps)
 		(void)MI_SNR_SetOrien(ps->sensor.pad_id,
 			(uint8_t)(vcfg->image.mirror ? 1 : 0),
 			(uint8_t)(vcfg->image.flip ? 1 : 0));
-	fprintf(stderr, "> Sensor fps %u -> %u\n", prev, fps);
+	fprintf(stderr, "> Sensor fps %u -> %u, max shutter %uus%s\n", prev,
+		fps, 1000000 / (fps * (rule_180 ? 2 : 1)),
+		rule_180 ? " (180-degree rule, pinned)" : "");
 	return 0;
 }
 
