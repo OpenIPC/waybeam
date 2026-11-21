@@ -195,13 +195,14 @@ int star6e_pipeline_set_pause_stab(bool paused);
 void star6e_pipeline_zoom_status(Star6eZoomStatus *out);
 
 /** Service custom 3A (AWB/AE) at regular intervals. */
+/* Run-time MI_SNR_SetFps under one lock; records the rate on success.
+ * fps 0 re-kicks the current rate. */
+int star6e_pipeline_set_sensor_fps(Star6ePipelineState *state, uint32_t fps);
+
 /** One-shot cold-boot fps re-kick.  Call once ~1.5s after pipeline start from
  *  the run loop; re-issues MI_SNR_SetFps to force the sensor timing register to
  *  the configured fps (the init-time kick fires before the ISP bin settles and
  *  can leave the sensor locked low on a cold boot).  No-op when fps is 0. */
-/* Run-time MI_SNR_SetFps under one lock; records the rate on success.
- * fps 0 re-kicks the current rate. */
-int star6e_pipeline_set_sensor_fps(Star6ePipelineState *state, uint32_t fps);
 void star6e_pipeline_cold_boot_fps_rekick(Star6ePipelineState *state,
 	const VencConfig *vcfg);
 

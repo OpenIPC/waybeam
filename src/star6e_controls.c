@@ -584,6 +584,19 @@ static void set_delivered_fps(uint32_t fps)
 			rtp_session_frame_ticks(fps), __ATOMIC_RELAXED);
 }
 
+/* A failed apply rolls the config back, so the sensor too.  The bind is
+ * back at mode_max:mode_max, which delivers what the sensor runs at; a
+ * fallback rate is not trusted (fixed-timing modes run at their own). */
+static void fps_apply_failed(uint32_t raised_from, uint32_t mode_max)
+{
+	const Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
+
+	if (raised_from)
+		(void)program_sensor_fps(raised_from);
+	set_delivered_fps(ps && ps->sensor.fps && !ps->sensor.fps_fallback &&
+		ps->sensor.fps < mode_max ? ps->sensor.fps : mode_max);
+}
+
 static int apply_fps(uint32_t fps)
 {
 	MI_S32 bind_ret;
@@ -624,10 +637,7 @@ static int apply_fps(uint32_t fps)
 		MI_SYS_BindChnPort2(&g_star6e_control_ctx.vpe_port,
 			&g_star6e_control_ctx.venc_port, sensor_fps, sensor_fps,
 			I6_SYS_LINK_FRAMEBASE, 0);
-		/* A failed apply rolls the config back: so the sensor. */
-		if (raised_from)
-			(void)program_sensor_fps(raised_from);
-		set_delivered_fps(raised_from ? raised_from : sensor_fps);
+		fps_apply_failed(raised_from, sensor_fps);
 		return -1;
 	}
 
@@ -643,10 +653,7 @@ static int apply_fps(uint32_t fps)
 		MI_SYS_BindChnPort2(&g_star6e_control_ctx.vpe_port,
 			&g_star6e_control_ctx.venc_port, sensor_fps, sensor_fps,
 			I6_SYS_LINK_FRAMEBASE, 0);
-		/* A failed apply rolls the config back: so the sensor. */
-		if (raised_from)
-			(void)program_sensor_fps(raised_from);
-		set_delivered_fps(raised_from ? raised_from : sensor_fps);
+		fps_apply_failed(raised_from, sensor_fps);
 		return -1;
 	}
 
