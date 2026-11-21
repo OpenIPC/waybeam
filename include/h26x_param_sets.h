@@ -13,6 +13,7 @@ typedef struct {
 	size_t sps_len;
 	uint8_t pps[512];
 	size_t pps_len;
+	uint8_t inband; /* hevc_rtp: VPS/SPS/PPS bits sent since the last slice */
 } H26xParamSets;
 
 typedef struct {

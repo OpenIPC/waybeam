@@ -19,7 +19,8 @@ costs one slice instead of the whole picture.
   packet taking 2.2-4.2 slices; one NAL per slice was chosen on the trials.
 - Each NAL's type is read from its own header (the SDK's pack type describes
   only the first NAL of a pack), and VPS/SPS/PPS are prepended once per IRAP
-  picture, before its first slice, never once per slice.
+  picture, before its first slice, never once per slice, and not at all
+  when the encoder has just sent its own (3 fewer datagrams per IDR).
 - All SSC338Q slices are independent segments (6020 independent, 0
   dependent in a 60 fps trace), so a lost slice never takes its neighbours.
 - No API change. With `outgoing.fec` the per-frame blocks simply hold more

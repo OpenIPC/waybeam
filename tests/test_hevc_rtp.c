@@ -392,8 +392,8 @@ static int test_hevc_rtp_send_annexb(void)
 	memset(&cap, 0, sizeof(cap));
 	hevc_rtp_send_annexb(buf, n, &params, &rtp, capture_write, &cap, 1,
 		1400, NULL);
-	CHECK("annexb: VPS SPS PPS learned and kept separate",
-		params.vps_len == 24 && params.pps_len == 8 && cap.count >= 4 &&
+	CHECK("annexb: VPS SPS PPS learned, kept separate, not sent twice",
+		params.vps_len == 24 && params.pps_len == 8 && cap.count == 4 &&
 		pkt_nal_type(&cap.packets[0]) == 32 &&
 		pkt_nal_type(&cap.packets[1]) == 33 &&
 		pkt_nal_type(&cap.packets[2]) == 34);
@@ -412,6 +412,20 @@ static int test_hevc_rtp_send_annexb(void)
 		cap.count == 5 && pkt_nal_type(&cap.packets[0]) == 32 &&
 		pkt_nal_type(&cap.packets[3]) == 19 &&
 		pkt_nal_type(&cap.packets[4]) == 19);
+
+	/* The encoder's own sets in a pack of their own, then the IDR: the
+	 * in-band copy still counts, so nothing is prepended. */
+	n = annexb_put(buf, 0, 1, 32, 0, 24);
+	n = annexb_put(buf, n, 1, 33, 0, 40);
+	n = annexb_put(buf, n, 1, 34, 0, 8);
+	memset(&cap, 0, sizeof(cap));
+	hevc_rtp_send_annexb(buf, n, &params, &rtp, capture_write, &cap, 0,
+		1400, NULL);
+	n = annexb_put(buf, 0, 1, 19, 1, 60);
+	hevc_rtp_send_annexb(buf, n, &params, &rtp, capture_write, &cap, 1,
+		1400, NULL);
+	CHECK("annexb: in-band sets in an earlier pack suppress the prepend",
+		cap.count == 4 && pkt_nal_type(&cap.packets[3]) == 19);
 
 	/* No start code: the region is one raw NAL. */
 	memset(&cap, 0, sizeof(cap));
