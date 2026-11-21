@@ -981,10 +981,11 @@ static void cv610_report_frame_gate_setup(FrameGateSetupStatus st,
 	}
 }
 
-/* Adaptive frame gate — the CV610 twin of star6e_service_frame_gate().  Same
- * rationale (a bitrate write implicitly keyframes; stopping frame intake
- * changes no encoder state) and the same signal, the instantaneous egress
- * ring occupancy rather than the 200 ms low-water window.
+/* Adaptive frame gate — the CV610 twin of star6e_service_frame_gate().
+ * Stopping frame intake changes no encoder state (a bitrate write keyframes
+ * on Star6E; on CV610 it does not, measured 2026-11-21), and the signal is
+ * the same: the instantaneous egress ring occupancy rather than the 200 ms
+ * low-water window.
  *
  * Called from the normal per-frame path AND from every branch of the stream
  * loop that can be reached while the gate is closed — no frames are produced

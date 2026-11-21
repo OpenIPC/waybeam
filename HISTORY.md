@@ -8,8 +8,9 @@ on a radio link whose ground recovers it. Contract 0.35.0 (additive).
 - **Same wire, same code:** the parity producer moved out of the Star6E
   output into `src/venc_fec.c`, and both backends use it. PT 100, its own
   SSRC and sequence space, 25 % of the video by bytes, blocks of at most 40.
-- **Same rules:** live on and off at a frame boundary, `video0.bitrate` is the
-  wire total (the encoder gets 4/5), `udp://` or `unix://` RTP only, and
+- **Same rules:** live on and off at a frame boundary (on CV610 the rate
+  re-split costs no keyframe), `video0.bitrate` is the wire total (the
+  encoder gets 4/5), `udp://` or `unix://` RTP only, and
   `maxPayloadSize` at most 3780. With it on, the RTP payload size is derived
   from the slice size, as on Star6E.
 - **Load rule:** a CV610 config file pairing `fec:true` with a `frame-shm://`

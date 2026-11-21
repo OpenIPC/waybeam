@@ -677,7 +677,8 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
   request, so `fec=true&maxPayloadSize=1400` is accepted in either order, and on
   the config file at startup: a file pairing `fec:true` with a `frame-shm://`
   server (CV610's usual transport) or `maxPayloadSize` above 3780 does not load.
-  A live toggle re-programs the encoder bitrate (one IDR on Star6E) and parity
+  A live toggle re-programs the encoder bitrate (one IDR on Star6E, none on
+  CV610, where the GOP cadence runs straight through) and parity
   starts or stops at the next frame boundary; a toggle never splits a frame.
 - `outgoing.connected_udp`: When `true`, calls `connect()` on the UDP socket so the kernel
   returns ICMP port-unreachable errors via `sendmsg()`. Useful for detecting that a receiver
