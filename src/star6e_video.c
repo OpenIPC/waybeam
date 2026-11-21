@@ -133,14 +133,12 @@ size_t star6e_video_send_frame(Star6eVideoState *state,
 			__atomic_store_n(&state->payload_used, payload,
 				__ATOMIC_RELAXED);
 		if (frame_packetizer.slices) {
-			const int32_t mean = (int32_t)(frame_packetizer.slice_bytes /
-				frame_packetizer.slices);
+			const uint32_t mean = frame_packetizer.slice_bytes /
+				frame_packetizer.slices;
 
 			/* EWMA 1/8: follows the scene, not one frame. */
 			state->slice_avg = state->slice_avg ?
-				(uint32_t)((int32_t)state->slice_avg +
-				(mean - (int32_t)state->slice_avg) / 8) :
-				(uint32_t)mean;
+				(state->slice_avg * 7 + mean) / 8 : mean;
 		}
 
 		if (sidecar_active) {

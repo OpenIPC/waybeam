@@ -30,8 +30,7 @@ extern "C" {
  * the video, and the commanded video0.bitrate is the TOTAL on the wire, so
  * the encoder gets DIV/(DIV+1) of it.  The payload cap keeps a parity
  * datagram (payload + 20 B) within the receiving link's 3800 B datagram
- * limit.  Larger payloads mean fewer, longer RS symbols: allowed, not
- * chosen -- the default stays 1400. */
+ * limit. */
 #define VENC_FEC_PARITY_DIV 4
 #define VENC_FEC_MAX_PAYLOAD_BYTES 3780
 static inline uint32_t venc_fec_video_kbps(int fec, uint32_t total_kbps)
