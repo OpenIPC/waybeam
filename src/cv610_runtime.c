@@ -20,6 +20,7 @@
 #include "output_socket.h"
 #include "rtp_session.h"
 #include "rtp_sidecar.h"
+#include "venc_fec.h"
 #include "timing.h"
 #include "frame_gate.h"
 #include "venc_frame_ring.h"
@@ -153,6 +154,11 @@ typedef struct {
 	uint32_t pressure_frames;
 	RtpPacketizerState rtp;
 	H26xParamSets param_sets;
+	/* RS parity after each frame (protocols/venc-fec.md).  slice_avg sizes
+	 * the payload with it on; payload_used is what the last RTP frame used. */
+	VencFec fec;
+	uint32_t slice_avg;
+	uint16_t payload_used;
 	DebugOsdState *debug_osd;
 	Cv610AudioState *audio;
 	HevcRtpStats rtp_stats;
@@ -280,14 +286,64 @@ static int cv610_update_venc_attr(uint32_t bitrate, uint32_t gop,
 	return ret == TD_SUCCESS ? 0 : -1;
 }
 
+/* video0.bitrate is the wire total: with RS parity on, the encoder gets its
+ * video share, held to the encoder rails after the split. */
+static uint32_t cv610_encoder_kbps(uint32_t total_kbps, int fec)
+{
+	uint32_t kbps = venc_fec_video_kbps(fec, total_kbps);
+
+	if (kbps > VENC_BITRATE_MAX_KBPS)
+		kbps = VENC_BITRATE_MAX_KBPS;
+	if (kbps < VENC_BITRATE_MIN_KBPS)
+		kbps = VENC_BITRATE_MIN_KBPS;
+	return kbps;
+}
+
 static int cv610_apply_bitrate(uint32_t kbps)
 {
-	int ret = cv610_update_venc_attr(kbps, 0, 1u);
+	int ret;
+
+	if (!g_cv610_runner)
+		return -1;
+	ret = cv610_update_venc_attr(cv610_encoder_kbps(kbps,
+		__atomic_load_n(&g_cv610_runner->fec.on, __ATOMIC_RELAXED)), 0, 1u);
 
 	if (ret == 0 && g_cv610_runner)
 		__atomic_store_n(&g_cv610_runner->live_bitrate, kbps,
 			__ATOMIC_RELEASE);
 	return ret;
+}
+
+/* Live outgoing.fec.  video0.bitrate is the wire total, so a toggle
+ * re-splits it; parity starts or stops at the next frame.  Rate first when
+ * turning on, flag first when turning off, so no frame carries parity on
+ * top of the full video rate (Star6E's order).  Config validation holds it
+ * to a udp:// / unix:// RTP server, which a live server change cannot
+ * leave without a respawn. */
+static int cv610_apply_fec(bool on)
+{
+	Cv610RunnerContext *ctx = g_cv610_runner;
+	uint32_t total;
+
+	if (!ctx || ctx->frame_ring)
+		return -1;
+	if (__atomic_load_n(&ctx->fec.on, __ATOMIC_RELAXED) == (int)on)
+		return 0;
+	total = __atomic_load_n(&ctx->live_bitrate, __ATOMIC_ACQUIRE);
+	if (on && cv610_update_venc_attr(cv610_encoder_kbps(total, 1), 0,
+	    1u) != 0)
+		return -1;
+	if (venc_fec_set(&ctx->fec, on) != 0) {
+		(void)cv610_update_venc_attr(cv610_encoder_kbps(total, 0), 0, 1u);
+		return -1;
+	}
+	if (!on && cv610_update_venc_attr(cv610_encoder_kbps(total, 0), 0,
+	    1u) != 0) {
+		(void)venc_fec_set(&ctx->fec, 1);
+		return -1;
+	}
+	fprintf(stderr, "> outgoing.fec %s (live)\n", on ? "on" : "off");
+	return 0;
 }
 
 /* The CV610 encoder cannot take a GOP change while intra refresh is running.
@@ -1058,12 +1114,19 @@ static char *cv610_query_transport_status(void)
 			"\"active\":true,\"transport\":\"%s\","
 			"\"fillPct\":%u,\"inPressure\":%s,"
 			"\"pressureDrops\":%u,\"transportDrops\":%llu,"
-			"\"packetsSent\":%llu}}",
+			"\"packetsSent\":%llu,\"fecParityPkts\":%u,"
+			"\"fecUnprotected\":%u,\"rtpPayload\":%u}}",
 			ts.name, (unsigned)ts.fill_pct,
 			ts.in_pressure ? "true" : "false",
 			(unsigned)ts.pressure_frames,
 			(unsigned long long)ts.transport_drops,
-			(unsigned long long)ts.packets_sent);
+			(unsigned long long)ts.packets_sent,
+			(unsigned)__atomic_load_n(&ctx->fec.parity_pkts,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&ctx->fec.unprotected,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&ctx->payload_used,
+				__ATOMIC_RELAXED));
 	} else {
 		pos = snprintf(buf, sizeof(buf),
 			"{\"ok\":true,\"data\":{"
@@ -1526,6 +1589,7 @@ static const VencApplyCallbacks g_cv610_apply_callbacks = {
 	.request_idr = cv610_request_idr,
 	.query_live_fps = cv610_query_live_fps,
 	.apply_max_payload_size = cv610_apply_max_payload_size,
+	.apply_fec = cv610_apply_fec,
 	.query_transport_status = cv610_query_transport_status,
 	.query_audio_status = cv610_query_audio_status,
 	.query_iq_info = cv610_iq_query,
@@ -1643,6 +1707,23 @@ static uint32_t cv610_frame_vcl_nal_count(const uint8_t *frame, size_t len)
 	return count;
 }
 
+/* Video datagrams.  A 0 return (sent, or counted as an EAGAIN drop) used
+ * its sequence number, so the packet is a parity source: source i stays seq
+ * base + i, and parity can rebuild the dropped one. */
+static int cv610_video_write(const uint8_t *header, size_t header_len,
+	const uint8_t *payload1, size_t payload1_len,
+	const uint8_t *payload2, size_t payload2_len, void *opaque)
+{
+	Cv610RunnerContext *ctx = opaque;
+	const int ret = cv610_output_write(header, header_len, payload1,
+		payload1_len, payload2, payload2_len, opaque);
+
+	if (ret == 0)
+		venc_fec_capture(&ctx->fec, header, payload1, payload1_len,
+			payload2, payload2_len);
+	return ret;
+}
+
 static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 	const uint8_t *frame, size_t len)
 {
@@ -1651,9 +1732,13 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 	size_t nal_len;
 	int nal_count = 0;
 	int status = 0;
+	uint32_t slices = 0, slice_bytes = 0;
 	uint16_t max_payload;
 
+	venc_fec_begin_frame(&ctx->fec);
 	max_payload = __atomic_load_n(&ctx->max_payload_size, __ATOMIC_ACQUIRE);
+	if (ctx->fec.frame) /* derived with parity on; the ceiling stays the cap */
+		max_payload = venc_fec_payload_size(max_payload, ctx->slice_avg);
 
 	while (h26x_util_annexb_next(frame, len, &cursor, &nal, &nal_len)) {
 		uint8_t nal_type;
@@ -1664,10 +1749,10 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 		nal_count++;
 		is_last = cursor == len;
 		(void)hevc_rtp_param_sets_before(&ctx->param_sets, nal_type,
-			nal, nal_len, &ctx->rtp, cv610_output_write, ctx,
+			nal, nal_len, &ctx->rtp, cv610_video_write, ctx,
 			max_payload, &ctx->rtp_stats);
 		sent = hevc_rtp_send_nal(nal, nal_len, &ctx->rtp,
-			cv610_output_write, ctx, is_last,
+			cv610_video_write, ctx, is_last,
 			max_payload, &ctx->rtp_stats);
 		if (sent != nal_len) {
 			/* A fragmented NAL may fail after some FU packets were sent.
@@ -1678,6 +1763,28 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 			break;
 		}
 		hevc_rtp_param_sets_sent(&ctx->param_sets, nal_type);
+		if (nal_type < 16) { /* non-IRAP slice: payload sizing */
+			slices++;
+			slice_bytes += (uint32_t)nal_len;
+		}
+	}
+	if (slices) { /* EWMA 1/8: follows the scene, not one frame */
+		const uint32_t mean = slice_bytes / slices;
+
+		ctx->slice_avg = ctx->slice_avg ?
+			(ctx->slice_avg * 7 + mean) / 8 : mean;
+	}
+	__atomic_store_n(&ctx->payload_used, max_payload, __ATOMIC_RELAXED);
+	/* Parity after the video, and none after a hard send failure: that
+	 * socket just gave up.  Counted as it reaches the socket. */
+	if (status == 0 && ctx->fec.count) {
+		const uint64_t sent0 = __atomic_load_n(&ctx->packets_sent,
+			__ATOMIC_RELAXED);
+
+		venc_fec_emit(&ctx->fec, cv610_output_write, ctx);
+		__atomic_fetch_add(&ctx->fec.parity_pkts, (uint32_t)(
+			__atomic_load_n(&ctx->packets_sent, __ATOMIC_RELAXED) -
+			sent0), __ATOMIC_RELAXED);
 	}
 	/* An output failure may drop this access unit, but time still advances. */
 	ctx->rtp.timestamp += ctx->frame_ticks;
@@ -1989,7 +2096,8 @@ static int cv610_venc_start(Cv610RunnerContext *ctx)
 	attr.rc_attr.h265_cbr.stats_time = 1;
 	attr.rc_attr.h265_cbr.src_frame_rate = ctx->pipeline.fps;
 	attr.rc_attr.h265_cbr.dst_frame_rate = ctx->pipeline.fps;
-	attr.rc_attr.h265_cbr.bit_rate = ctx->config.video0.bitrate;
+	attr.rc_attr.h265_cbr.bit_rate = cv610_encoder_kbps(
+		ctx->config.video0.bitrate, ctx->config.outgoing.fec);
 	attr.gop_attr.gop_mode = OT_VENC_GOP_MODE_NORMAL_P;
 	/* normal_p.ip_qp_delta is deliberately left at 0.  The CBR rate
 	 * controller stores it and ignores it -- measured across -12..+12, live
@@ -2152,6 +2260,13 @@ static int cv610_output_start(Cv610RunnerContext *ctx)
 
 	ctx->output_enabled = ctx->config.outgoing.enabled ? 1 : 0;
 
+	/* RS parity, also before the bail: cv610_venc_start() already gave the
+	 * encoder its video share, and a craft that boots disabled must send
+	 * parity once enabled.  Load validation holds fec:true to a udp:// /
+	 * unix:// RTP server. */
+	if (ctx->config.outgoing.fec && venc_fec_set(&ctx->fec, 1) != 0)
+		return -1;
+
 	/* Seed the RTP session BEFORE the outgoing.enabled bail, not after.
 	 * outgoing.enabled is live from 0.77.0, so a craft can boot disabled and
 	 * be enabled over HTTP -- and the context is calloc'd, so bailing first
@@ -2264,6 +2379,7 @@ static void cv610_output_stop(Cv610RunnerContext *ctx)
 		close(ctx->socket_handle);
 		ctx->socket_handle = -1;
 	}
+	venc_fec_free(&ctx->fec);
 }
 
 static VencConfig *cv610_config(void *opaque)

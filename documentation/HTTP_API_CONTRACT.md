@@ -18,7 +18,7 @@
   - `read_only` — cannot be changed via API.
 
 ## Contract Version
-- `contract_version`: `0.34.0`
+- `contract_version`: `0.35.0`
 - `status`: `active`
 
 ## Per-Backend Field Support
@@ -34,7 +34,7 @@
 | `video0.intraRefreshQp` | **false** | **false** | true |
 | `video0.frameGateCloseSlots` / `frameGateMaxClosedMs` | true | true | true (**from 0.85.4**) |
 | `outgoing.sidecarPort` | true | true | true (**from 0.74.0**) |
-| `outgoing.fec` | true | **false** | **false** |
+| `outgoing.fec` | true | **false** | true (**from 0.88.0**) |
 | `image.mirror` / `image.flip` | true | true | true (**from 0.75.0**) |
 | `image.rotate` | true | true | **false** |
 | `fpv.roiEnabled` / `roiQp` / `roiSteps` / `roiCenter` | true | true | true (**from 0.25.0**) |
@@ -109,8 +109,8 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.87.5",
-    "contract_version": "0.34.0",
+    "app_version": "0.88.0",
+    "contract_version": "0.35.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
   }
@@ -663,9 +663,10 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
   Live updates are accepted across all transports (`udp://`, `unix://`, `shm://`):
   the SHM ring slot is sized at startup to fit the validated ceiling so any value
   in range applies live without restart, just like UDP/Unix.
-- `outgoing.fec`: Live boolean, default `false`. Star6E only (advertised
-  unsupported on Maruko and CV610, where a configured value is ignored and not
-  validated, so it never blocks another outgoing key; before 0.87.4 it did). Sends Reed–Solomon parity after each frame's
+- `outgoing.fec`: Live boolean, default `false`. Star6E, and CV610 from 0.88.0
+  (advertised unsupported on Maruko, where a configured value is ignored and not
+  validated, so it never blocks another outgoing key; before 0.87.4 it did; on
+  CV610 the same held in 0.87.4-0.87.x). Both backends send identical parity. Sends Reed–Solomon parity after each frame's
   packets on the same socket, per `protocols/venc-fec.md` in the coordination repo:
   PT 100, its own SSRC and sequence space, at most 3800 B per datagram, 25 % of the
   video. `video0.bitrate` stays the **total** on the wire: the encoder is programmed
@@ -673,9 +674,11 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
   Requires `streamMode=rtp`, a `udp://` or `unix://` server (or none yet), and
   `maxPayloadSize <= 3780`; those combinations are rejected, including a live
   `maxPayloadSize` above 3780 while it is on. The rule is checked on the whole
-  request, so `fec=true&maxPayloadSize=1400` is accepted in either order. A live
-  toggle re-programs the encoder bitrate (one IDR) and parity starts or stops at
-  the next frame boundary; a toggle never splits a frame.
+  request, so `fec=true&maxPayloadSize=1400` is accepted in either order, and on
+  the config file at startup: a file pairing `fec:true` with a `frame-shm://`
+  server (CV610's usual transport) or `maxPayloadSize` above 3780 does not load.
+  A live toggle re-programs the encoder bitrate (one IDR on Star6E) and parity
+  starts or stops at the next frame boundary; a toggle never splits a frame.
 - `outgoing.connected_udp`: When `true`, calls `connect()` on the UDP socket so the kernel
   returns ICMP port-unreachable errors via `sendmsg()`. Useful for detecting that a receiver
   is down. Default `false` (fire-and-forget).
@@ -2016,7 +2019,7 @@ in Notes. As of `contract_version: 0.29.0`:
 | `/api/v1/awb` | live | live | All three backends register `query_awb_info`. CV610 serves `ot_isp_wb_info` plus `ot_isp_exp_info` (the AE's own applied `exp_time`, `a_gain`, `isp_d_gain`, `ave_lum`) — a different payload from the SigmaStar one, and the instrument the `isp.gainMax`/`isp.shutterMaxUs` mapping was verified against. |
 | `/api/v1/ae` | live + `runtime.active_precrop` | live + `runtime.active_precrop` | Both backends now include `runtime.active_precrop` in the AE response (Maruko parity landed in `0.8.4`). |
 | RTP sidecar (`outgoing.sidecarPort`, UDP :5602) | yes | yes | **CV610 from 0.74.0**; before that `src/rtp_sidecar.c` was not compiled into the CV610 binary at all, so the field was accepted, persisted and silently did nothing. CV610 emits the base FRAME plus TRANSPORT_INFO. It has no IMU and no detector, so ATTITUDE and DETECT trailers are never appended; ENC_INFO carries `frame_size_bytes`, `frame_type`, `qp` (the encoder's `h265_info.start_qp`) and `frames_since_idr`; `complexity`, `scene_change` **and `idr_inserted`** stay 0 because the shared scene detector is not compiled in on this backend. **`idr_inserted` is deliberately not produced here** (corrected in 0.81.0, which briefly set it): the field means "the controller *requested* an IDR after this frame", and on the SigmaStar backends the only writer is the scene detector, so there it is disjoint from `frame_type == IDR`. CV610 has no such controller, so setting it on every IDR would duplicate `frame_type` and `FLAG_KEYFRAME` — a ground consumer summing it as "IDR insertions" would read a once-per-GOP static scene as one insertion per second while an identically configured SigmaStar craft reported zero; `gop_state` is 0 on all three backends, as nothing in the tree writes it. **`qp` is CV610-only**: the SigmaStar encoder populates only `refType` in its H.265 stream-info struct — `size`, all eight CU counts, `updAttrCnt` and `startQual` read 0 on the device (dumped on i6 at 0.79.0; the struct offset is correct, since `refType` lands exactly where the header says). Reading `startQual` into the trailer was tried and shipped zeros, so Star6E and Maruko leave `qp` at 0 rather than advertise a value that is always 0. Recovering a per-frame QP there means parsing `slice_qp_delta` out of the slice header. Under `frame-shm://` only `seq_count` is 0 on every backend (the packetizer never runs, so no sequence numbers are consumed); `ssrc`, `rtp_timestamp` and `seq_first` are seeded and non-zero, because the RTP session is gated on the *stream mode* rather than the transport. The trailer carries the ring state. |
-| `/api/v1/transport/status` | yes | yes | Three distinct field sets by transport: `frame-shm://` (ring fields plus `ringLowWaterSlots`/`otherDrops`), `shm://` (packet-ring fields), and UDP/Unix (socket subset). `badAuDrops` appears on every transport. **CV610** serves the same endpoint but emits no `badAuDrops` (no packet-table validation in its stream path); its `frame-shm` branch does carry `ringLowWaterSlots` and `otherDrops`. |
+| `/api/v1/transport/status` | yes | yes | Three distinct field sets by transport: `frame-shm://` (ring fields plus `ringLowWaterSlots`/`otherDrops`), `shm://` (packet-ring fields), and UDP/Unix (socket subset). `badAuDrops` appears on every transport. **CV610** serves the same endpoint but emits no `badAuDrops` (no packet-table validation in its stream path); its `frame-shm` branch does carry `ringLowWaterSlots` and `otherDrops`, and from 0.88.0 its `udp`/`unix` branch carries `fecParityPkts`, `fecUnprotected` and `rtpPayload`. |
 | `/api/v1/idr/stats` | yes | yes | Identical schema; values reflect each backend's IDR rate-limit. |
 | `video0.codec=h264` | 404 unknown_field | 404 unknown_field | Field retired in 0.10.12; codec is hardcoded H.265 on both backends. |
 | `video0.scene_threshold` / `scene_holdoff` | yes | yes | Restart-required fields; both backends run the shared scene detector. |
@@ -2028,6 +2031,10 @@ in Notes. As of `contract_version: 0.29.0`:
 | `isp.aeEngine` ("sdk" only) | applied | applied | Unified AE selector landed in 0.10.13.  `custom` (userspace AE governor) is RETIRED — Maruko in 0.22.0, Star6E in 0.47.0 — and the value was **removed** in 0.47.0.  `sdk` is the only accepted value; any other (e.g. a stale `custom`) warns and falls back to `sdk`.  Both backends run the SDK firmware/bin AE for convergence plus a supervisory thread that enforces the `isp.gain*`/`isp.shutter*` limits.  CV610 has no such thread and reports `isp.aeEngine` unsupported: its ISP owns AE outright, and the two ceilings it does honour are written straight into `ot_isp_exposure_attr.auto_attr` instead. |
 
 ## Change Log (Contract)
+- `0.35.0` (additive; from venc 0.88.0): `outgoing.fec` is supported on
+  CV610, with the same rules and wire as Star6E. CV610's
+  `GET /api/v1/transport/status` on `udp://` and `unix://` gains
+  `fecParityPkts`, `fecUnprotected` and `rtpPayload`.
 - `0.34.0` (additive; from venc 0.87.2): with `outgoing.fec` on, the RTP
   payload size is derived from the slice size, with `outgoing.maxPayloadSize`
   as its ceiling. `GET /api/v1/transport/status` gains `rtpPayload` on

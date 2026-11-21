@@ -104,7 +104,8 @@ CV610_SRC := src/main.c src/backend_cv610.c src/cv610_runtime.c \
 	src/framing_kalman.c src/attitude_est.c src/debug_osd.c \
 	src/debug_osd_draw.c lib/cJSON.c \
 	src/h26x_util.c src/h26x_param_sets.c src/rtp_packetizer.c \
-	src/hevc_rtp.c src/rtp_session.c src/rtp_sidecar.c src/output_socket.c \
+	src/hevc_rtp.c src/rs_fec.c src/venc_fec.c \
+	src/rtp_session.c src/rtp_sidecar.c src/output_socket.c \
 	src/venc_frame_ring.c src/mdns_wire.c src/mdns_beacon.c \
 	src/device_id.c src/venc_respawn.c
 # Image-stabilization framing module (Star6E).  STAB=1 (default) compiles it
