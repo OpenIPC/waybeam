@@ -89,9 +89,10 @@ stage_detect_model() {
 }
 
 # Wait up to $1 seconds for the daemon (and any orphan helper) to exit.
-# Never SIGKILL: venc's SIGTERM handler is what releases the SigmaStar
-# MI_SYS / MI_VENC kernel state, and a killed venc leaves it wedged until a
-# power cycle.  A venc that ignores 30 s of SIGTERM is already hung there.
+# Never SIGKILL from here: venc's SIGTERM handler is what releases the
+# SigmaStar MI_SYS / MI_VENC kernel state, and a venc killed mid-run leaves
+# it wedged until a power cycle.  A teardown that hangs is venc's own
+# watchdog's to handle (waybeam-wd), which reboots the SoC on Star6E.
 wait_exit() {
     i=0
     while [ $i -lt $(($1 * 2)) ]; do
@@ -160,8 +161,11 @@ stop() {
         echo "OK"
         return 0
     fi
-    echo "FAILED: still running after 30 s of SIGTERM; not sending SIGKILL" \
-        "(it wedges the SigmaStar encoder until a power cycle), reboot to recover"
+    # Either venc hung in teardown, or an API restart already in flight
+    # forked its successor after the SIGTERM above.
+    echo "FAILED: still running after 30 s of SIGTERM (hung, or an API" \
+        "restart started a new instance); not sending SIGKILL, which wedges" \
+        "the SigmaStar encoder until a power cycle"
     return 1
 }
 
