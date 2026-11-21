@@ -1,5 +1,22 @@
 # History
 
+## [0.87.4] - 2026-11-21
+
+Two fixes outside Star6E, found by checking the 0.87.x FEC and RTP work
+against the other backends.
+
+- **A stray `outgoing.fec` no longer blocks CV610 or Maruko.** Both ignore
+  the key, but the FEC rule still ran there: a `fec:true` left in a config
+  (say, copied from a Star6E camera) made unrelated sets such as
+  `outgoing.server=frame-shm://…` or `maxPayloadSize` above 3780 fail with
+  409, could not be cleared (`fec=false` answers 501), and could fail the
+  config load. The rule now runs only where FEC exists. Since 0.87.0.
+- **CV610 sends VPS/SPS/PPS once per IDR picture.** It prepended them before
+  every IDR slice, on top of the encoder's own in-band sets: about 51 extra
+  datagrams per IDR at 17 slices, and parameter sets inside one picture. It
+  now uses the same rule as Star6E and Maruko since 0.87.1: once, before the
+  picture's first slice, and not at all when the encoder just sent them.
+
 ## [0.87.3] - 2026-11-21
 
 Star6E: a live `video0.fps` raise above the rate venc started at now

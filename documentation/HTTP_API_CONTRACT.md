@@ -109,7 +109,7 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.87.3",
+    "app_version": "0.87.4",
     "contract_version": "0.34.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
@@ -664,7 +664,8 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
   the SHM ring slot is sized at startup to fit the validated ceiling so any value
   in range applies live without restart, just like UDP/Unix.
 - `outgoing.fec`: Live boolean, default `false`. Star6E only (advertised
-  unsupported on Maruko and CV610). Sends Reed–Solomon parity after each frame's
+  unsupported on Maruko and CV610, where a configured value is ignored and not
+  validated, so it never blocks another outgoing key; before 0.87.4 it did). Sends Reed–Solomon parity after each frame's
   packets on the same socket, per `protocols/venc-fec.md` in the coordination repo:
   PT 100, its own SSRC and sequence space, at most 3800 B per datagram, 25 % of the
   video. `video0.bitrate` stays the **total** on the wire: the encoder is programmed
