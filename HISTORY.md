@@ -21,6 +21,12 @@ costs one slice instead of the whole picture.
   only the first NAL of a pack), and VPS/SPS/PPS are prepended once per IRAP
   picture, before its first slice, never once per slice, and not at all
   when the encoder has just sent its own (3 fewer datagrams per IDR).
+- A slice larger than one packet is cut into equal FU fragments instead of
+  full ones plus a small tail: the same packet count, but a shorter longest
+  packet. With `outgoing.fec` the parity symbol is the block's longest
+  packet, so the same 25 % buys more parity packets (100 fps: 1.42 -> 1.77
+  per frame, about 40 % fewer unrecoverable frames in a replay of the
+  trial traces).
 - All SSC338Q slices are independent segments (6020 independent, 0
   dependent in a 60 fps trace), so a lost slice never takes its neighbours.
 - No API change. With `outgoing.fec` the per-frame blocks simply hold more

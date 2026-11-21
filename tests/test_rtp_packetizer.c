@@ -164,6 +164,22 @@ static int test_rtp_packetizer_send_hevc_fu(void)
 		writer.writes[0].header[1] == 97 &&
 		writer.writes[2].header[1] == (uint8_t)(0x80 | 97));
 
+	/* 7 body bytes at 3 per fragment: equal pieces 3+2+2, never 3+3+1. */
+	{
+		const uint8_t nal7[] = {0x26, 0x01, 1, 2, 3, 4, 5, 6, 7};
+
+		memset(&writer, 0, sizeof(writer));
+		writer.fail_at_call = -1;
+		CHECK("rtp_pkt_hevc_fu_equal_fragments",
+			rtp_packetizer_send_hevc_nal(&state, test_rtp_writer,
+				&writer, nal7, sizeof(nal7), 1, 6, &result) ==
+			sizeof(nal7) && writer.call_count == 3 &&
+			writer.writes[0].payload_len == 6 &&
+			writer.writes[1].payload_len == 5 &&
+			writer.writes[2].payload_len == 5 &&
+			writer.writes[2].payload[4] == 7);
+	}
+
 	return failures;
 }
 
