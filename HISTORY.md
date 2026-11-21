@@ -1,5 +1,29 @@
 # History
 
+## [0.88.4] - 2026-11-21
+
+Maruko: three exposure and timing fixes.
+
+- **The sensor driver no longer caps exposure at the mode's top rate.** The
+  IMX415 and IMX335 Maruko drivers reported their longest shutter from the
+  mode's maximum fps, and the ISP clamps every exposure limit to that range.
+  Started at 30 fps in a 100 fps mode, venc's 33333 us cap read back as
+  10000 us, 3.3x less light in the dark; the 180-degree rule's 16666 us pin
+  read back as 10000. The drivers now use the mode's minimum fps, as the
+  Star6E drivers do. `sensors/maruko/*.ko` are rebuilt against the
+  Infinity6C 5.10.61 kernel; this needs the `.ko` deployed and a reboot.
+  Measured on an SSC378QE with an IMX335 in mode 1920x1080 at 100: the limit
+  at 30 fps went from 10000 to 33333 us (16666 with the rule), still at 30
+  pictures/s, and two cold boots at 100 fps still delivered 100.
+- **A live ISP-bin reload re-caps exposure and re-kicks the sensor rate,** as
+  Star6E does after a bin load. Before, the cap came back only on the AE
+  thread's next tick, and never with that thread off (`isp.aeFps=0`). The one
+  IMX335 bin on the bench does not reset the AE limit, so this one is not
+  reproduced on a device.
+- **The dual-stream ch1 RTP clock runs at ch1's rate.** It was seeded with
+  the sensor rate while ch1 delivers `record.fps`: measured 30 pictures/s with
+  a 900 step (the 90 kHz clock 3.3x slow); now 3000.
+
 ## [0.88.3] - 2026-11-21
 
 RS parity (`outgoing.fec`, Star6E and CV610): the encoder computes all of a
