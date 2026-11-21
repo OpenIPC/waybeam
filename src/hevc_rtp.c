@@ -89,19 +89,16 @@ size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 	const uint8_t *nal, *group = NULL;
 	size_t nal_len, group_len = 0, cursor = 0, total_bytes = 0;
 	int group_vcl = 0;
+	const int annexb = h26x_util_annexb_next(data, len, &cursor, &nal,
+		&nal_len);
 
-	if (!h26x_util_annexb_next(data, len, &cursor, &nal, &nal_len)) {
+	if (!annexb) {
 		/* No start code: one raw NAL (a raw NAL cannot contain one). */
 		nal = data;
 		nal_len = len;
 		h26x_util_strip_start_code(&nal, &nal_len);
 		if (!nal || nal_len == 0)
 			return 0;
-		if (params)
-			h26x_param_sets_update(params, PT_H265,
-				h26x_util_hevc_nalu_type(nal, nal_len), nal, nal_len);
-		return hevc_rtp_send_group(nal, nal_len, params, rtp, write_cb,
-			opaque, is_last, max_payload, stats);
 	}
 	do {
 		const uint8_t type = h26x_util_hevc_nalu_type(nal, nal_len);
@@ -129,7 +126,8 @@ size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 		group = nal;
 		group_len = nal_len;
 		group_vcl = type < 32;
-	} while (h26x_util_annexb_next(data, len, &cursor, &nal, &nal_len));
+	} while (annexb &&
+		 h26x_util_annexb_next(data, len, &cursor, &nal, &nal_len));
 	return total_bytes + hevc_rtp_send_group(group, group_len, params, rtp,
 		write_cb, opaque, is_last, max_payload, stats);
 }

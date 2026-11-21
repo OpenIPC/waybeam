@@ -2,7 +2,6 @@
 
 #include "venc_rec_writer.h"
 
-#include "h26x_util.h"
 #include "hevc_rtp.h"
 #include "rtp_packetizer.h"
 #include "rtp_session.h"

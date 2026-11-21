@@ -1,6 +1,5 @@
 #include "star6e_hevc_rtp.h"
 
-#include "h26x_util.h"
 #include "hevc_rtp.h"
 
 #include <string.h>
