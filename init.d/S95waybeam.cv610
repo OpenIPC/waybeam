@@ -45,6 +45,14 @@ start()
 		echo "$NAME disabled by configuration"
 		return 0
 	fi
+	# A daemon that was just sent SIGTERM still shows in pidof while it
+	# tears down.  Calling that "already running" returned 0 and left
+	# nothing running once it exited, so give it stop's 10 s first.
+	i=0
+	while still_running && [ "$i" -lt 100 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
 	if still_running; then
 		echo "$NAME already running"
 		return 0
