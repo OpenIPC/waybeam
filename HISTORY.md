@@ -17,11 +17,13 @@ Star6E got the same fix in 0.87.3.
   orientation is re-applied. The RTP step is re-derived on every delivered
   rate change.
 - **Left alone:** a sensor whose startup rate was a fallback is never
-  raised, and neither is one carrying the dual stream (ch1 is bound off ch0).
-  After one refusal venc stays bind-only, which is what delivered before. A
-  failed apply puts the sensor back.
+  raised, and neither is one carrying the dual stream (ch1 is bound off ch0)
+  or running `stab` / `stab-fill` framing (its per-frame detector is sized
+  for the start rate). After one refusal venc stays bind-only, which is what
+  delivered before. A failed apply puts the sensor back.
 - The live raise and the delayed cold-boot `SetFps` kick share one lock, and
-  the kick fires at a fixed frame.
+  the kick fires at a fixed frame. The kick now also re-applies mirror/flip,
+  as the init-time kick does.
 - Measured on an SSC378QE (sensor mode 1920x1080, max 100): 60 -> 100 -> 30
   -> 100 delivered 60/100/30/100 pictures/s, and the RTP step went
   1500/900/3000/900 in the same second. In a dim scene the AE ceiling held

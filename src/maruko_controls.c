@@ -408,14 +408,16 @@ static uint32_t maruko_query_live_fps(void);
 /* The sensor delivers the rate it was last PROGRAMMED to (startup:
  * video0.fps), not the mode max, and the SCL->VENC bind can only drop
  * frames, so a live raise above it re-programs the sensor (Star6E parity,
- * apply_fps() in src/star6e_controls.c).  When raising, the exposure cap and
- * the AE thread's auto ceiling move first, so AE never holds a shutter
- * longer than the new period; when lowering (a rollback), after.  The
- * 180-degree pin follows the new rate. */
+ * apply_fps() in src/star6e_controls.c).  When raising, the AE thread's
+ * 180-degree pin and auto ceiling, then the exposure cap, move first, so AE
+ * never holds a shutter longer than the new period (the thread re-writes the
+ * pin every tick); when lowering (a rollback), after. */
 static void cap_exposure_for_fps(uint32_t fps, bool rule_180)
 {
-	(void)pipeline_common_cap_exposure_for_fps(fps, rule_180);
+	if (rule_180)
+		maruko_cus3a_set_shutter_max(1000000 / (fps * 2));
 	maruko_cus3a_set_sensor_fps(fps);
+	(void)pipeline_common_cap_exposure_for_fps(fps, rule_180);
 }
 
 static int program_sensor_fps(uint32_t fps)
@@ -434,8 +436,6 @@ static int program_sensor_fps(uint32_t fps)
 	}
 	if (lower)
 		cap_exposure_for_fps(fps, rule_180);
-	if (rule_180)
-		maruko_cus3a_set_shutter_max(1000000 / (fps * 2));
 	g_ctx.sensor_fps = fps;
 	fprintf(stderr, "> [maruko] Sensor fps %u -> %u, max shutter %uus%s\n",
 		prev, fps, 1000000 / (fps * (rule_180 ? 2 : 1)),
@@ -451,17 +451,17 @@ static int program_sensor_fps(uint32_t fps)
 
 /* Raise the sensor for a live fps above its programmed rate.  Never on a
  * startup fallback rate (fixed-timing modes refuse SetFps), never while the
- * dual stream is up (ch1 is bound off ch0 at sensor:fps) or stab framing
- * runs (its per-frame detector is sized for the start rate), and after one
- * refusal bind-only, which is what delivered before.  Returns the rate
- * before the call, for a rollback (0 = untouched). */
+ * dual stream is up (ch1 is bound off ch0 at sensor:fps) or stab /
+ * stab-fill framing runs (its per-frame detector is sized for the start
+ * rate), and after one refusal bind-only, which is what delivered before.
+ * Returns the rate before the call, for a rollback (0 = untouched). */
 static uint32_t raise_sensor_fps(uint32_t fps)
 {
 	MarukoBackendContext *b = g_ctx.backend;
 	uint32_t prev;
 
 	if (!b || g_ctx.fps_raise_refused || b->dual ||
-	    (g_ctx.vcfg && strcmp(g_ctx.vcfg->video0.framing, "stab") == 0) ||
+	    (g_ctx.vcfg && strncmp(g_ctx.vcfg->video0.framing, "stab", 4) == 0) ||
 	    b->sensor.fps_fallback || b->sensor.fps == 0 || fps <= b->sensor.fps)
 		return 0;
 	prev = b->sensor.fps;
@@ -528,10 +528,9 @@ static int maruko_apply_fps(uint32_t fps)
 #if HAVE_FRAMING_STAB
 	if (maruko_framing_fill_graph_ready()) {
 		if (maruko_framing_stab_fill_set_fps(sensor_fps, fps) != 0) {
+			/* Never raised under stab-fill, and the FRC keeps its
+			 * ratio, so the sensor and the step both stay. */
 			printf("> FPS %u: fill FRC update failed\n", fps);
-			/* The FRC keeps its ratio, so the step stays. */
-			if (raised_from)
-				(void)program_sensor_fps(raised_from);
 			return -1;
 		}
 	} else
