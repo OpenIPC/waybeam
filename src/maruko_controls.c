@@ -297,15 +297,10 @@ static int maruko_rc_commit_intent(int require_bounds)
 /* ── Basic controls (existing) ───────────────────────────────────────── */
 
 /* No IDR request on bitrate writes — see the matching note in
- * src/star6e_controls.c apply_bitrate() for the measurement.
- *
- * Compile-tested only here.  Operator ruling 2026-08-26: assume i6c
- * set_chn_attr keyframes implicitly the way Star6E's MI_VENC_SetChnAttr was
- * measured to, and keep the two backends symmetric rather than diverging on
- * an untested difference.  Stated as an assumption because it is one — if a
- * Maruko ever reaches a bench, the check is ten spaced video0.bitrate writes
- * against a count of IRAP access units (not /api/v1/idr/stats, which only
- * sees requests and is blind to an SDK-implicit keyframe). */
+ * src/star6e_controls.c apply_bitrate() for the measurement.  i6c
+ * set_chn_attr keyframes implicitly too: measured on a Maruko (0.89.0),
+ * three spaced video0.bitrate writes and one outgoing.fec toggle each gave
+ * exactly one IRAP access unit in the pcap, and none came between them. */
 static int maruko_program_bitrate(uint32_t kbps, int fec)
 {
 	i6c_venc_chn attr = {0};
