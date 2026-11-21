@@ -29,7 +29,9 @@ Maruko: three exposure and timing fixes.
     shortened the shutter. The old 10 ms range could not reach this; the
     wider one can. Measured in the dark with the fix: 30, a live raise to
     100, back to 30 and to 100 again all delivered their rate, and a cold
-    boot at 100 delivered 100.
+    boot at 100 delivered 100. The trade: right after such a raise the
+    long exposure is cut to the new frame (at most 120 % of it), so the
+    first frames are darker until AE settles under the new cap.
   - The delayed cold-boot SetFps kick re-applies the cap first. The ISP's AE
     init can reset the limits after the startup cap, and with `isp.aeFps=0`
     no thread puts it back. Not reproduced on the bench: there the limit held
