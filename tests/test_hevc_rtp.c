@@ -19,6 +19,8 @@ typedef struct {
 typedef struct {
 	CapturedPacket packets[CAPTURE_MAX];
 	size_t count;
+	int fail_call; /* 1-based write to refuse, 0 = none */
+	int calls;
 } CaptureCtx;
 
 static int capture_write(const uint8_t *header, size_t header_len,
@@ -31,6 +33,8 @@ static int capture_write(const uint8_t *header, size_t header_len,
 
 	if (!ctx || ctx->count >= CAPTURE_MAX || header_len > sizeof(pkt->header)
 	    || combined > RTP_BUFFER_MAX)
+		return -1;
+	if (ctx->fail_call && ++ctx->calls == ctx->fail_call)
 		return -1;
 
 	pkt = &ctx->packets[ctx->count];
@@ -426,6 +430,21 @@ static int test_hevc_rtp_send_annexb(void)
 		1400, NULL);
 	CHECK("annexb: in-band sets in an earlier pack suppress the prepend",
 		cap.count == 4 && pkt_nal_type(&cap.packets[3]) == 19);
+
+	/* A refused in-band PPS does not count: the IDR still gets ours. */
+	n = annexb_put(buf, 0, 1, 32, 0, 24);
+	n = annexb_put(buf, n, 1, 33, 0, 40);
+	n = annexb_put(buf, n, 1, 34, 0, 8);
+	memset(&cap, 0, sizeof(cap));
+	cap.fail_call = 3; /* the PPS */
+	hevc_rtp_send_annexb(buf, n, &params, &rtp, capture_write, &cap, 0,
+		1400, NULL);
+	n = annexb_put(buf, 0, 1, 19, 1, 60);
+	memset(&cap, 0, sizeof(cap));
+	hevc_rtp_send_annexb(buf, n, &params, &rtp, capture_write, &cap, 1,
+		1400, NULL);
+	CHECK("annexb: a refused in-band set still gets the prepend",
+		cap.count == 4 && pkt_nal_type(&cap.packets[0]) == 32);
 
 	/* No start code: the region is one raw NAL. */
 	memset(&cap, 0, sizeof(cap));

@@ -63,7 +63,7 @@ size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 	size_t max_payload, HevcRtpStats *stats)
 {
 	const uint8_t *nal, *next;
-	size_t nal_len, next_len, cursor = 0, total_bytes = 0;
+	size_t nal_len, next_len, cursor = 0, total_bytes = 0, sent;
 	int more = 0;
 
 	if (h26x_util_annexb_next(data, len, &cursor, &nal, &nal_len)) {
@@ -81,9 +81,7 @@ size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 
 		if (params) {
 			h26x_param_sets_update(params, PT_H265, type, nal, nal_len);
-			if (type >= 32 && type <= 34) {
-				params->inband |= (uint8_t)(1u << (type - 32));
-			} else if (type < 32) {
+			if (type < 32) {
 				/* VPS/SPS/PPS once per IRAP picture, before its
 				 * first slice (first_slice_segment_in_pic_flag),
 				 * unless the encoder has just sent all three. */
@@ -95,8 +93,12 @@ size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 				params->inband = 0;
 			}
 		}
-		total_bytes += hevc_rtp_send_nal(nal, nal_len, rtp, write_cb,
-			opaque, is_last && !more, max_payload, stats);
+		sent = hevc_rtp_send_nal(nal, nal_len, rtp, write_cb, opaque,
+			is_last && !more, max_payload, stats);
+		total_bytes += sent;
+		/* The encoder's own set counts only once it went out. */
+		if (params && sent && type >= 32 && type <= 34)
+			params->inband |= (uint8_t)(1u << (type - 32));
 		if (!more)
 			return total_bytes;
 		nal = next;
