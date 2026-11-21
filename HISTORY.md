@@ -16,6 +16,13 @@ actually delivers it.
   then `MI_SNR_SetFps`, then the orientation re-applied. If the sensor
   refuses, the delivered and reported rate stay at what it runs. A lower
   rate still keeps the sensor where it is and decimates.
+- **The RTP clock follows a live fps change.** The video timestamp step
+  was fixed at the startup rate in both directions, so after 60 -> 100 the
+  90 kHz media clock ran 1.67x fast (and 3.3x slow at 30 from a 100 start),
+  misleading jitter buffers, A/V sync and sidecar timing. The step is now
+  re-derived from the delivered rate on every live fps change.
+- The live fps log lines are flushed: Star6E stdout is block-buffered into
+  the log file, so they could appear minutes late or not before a crash.
 - A live ISP-bin reload re-kicks the sensor at its running rate, not the
   mode maximum, which on a 60 fps start silently moved the sensor to the
   mode's top rate.

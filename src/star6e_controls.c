@@ -3,6 +3,7 @@
 #include "idr_rate_limit.h"
 #include "output_socket.h"
 #include "pipeline_common.h"
+#include "rtp_session.h"
 #include "star6e_audio.h"
 #include "star6e_awb.h"
 #include "star6e_cus3a.h"
@@ -537,6 +538,7 @@ static uint32_t raise_sensor_fps(uint32_t fps)
 	if (MI_SNR_SetFps(ps->sensor.pad_id, fps) != 0) {
 		printf("> Sensor SetFps(%u) failed, staying at %u fps\n", fps,
 			ps->sensor.fps);
+		fflush(stdout);
 		if (vcfg)
 			(void)star6e_pipeline_cap_exposure_for_fps(
 				ps->sensor.fps, vcfg->isp.shutter_rule_180);
@@ -550,6 +552,20 @@ static uint32_t raise_sensor_fps(uint32_t fps)
 	printf("> Sensor fps %u -> %u\n", ps->sensor.fps, fps);
 	ps->sensor.fps = fps;
 	return fps;
+}
+
+/* The RTP clock follows the delivered rate: video ticks per frame are 90 kHz
+ * / fps, so a live change must re-derive them or the media clock runs at
+ * startup-rate speed (x1.67 after 60 -> 100).  The encode thread reads the
+ * ticks once per frame. */
+static void set_delivered_fps(uint32_t fps)
+{
+	Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
+
+	g_star6e_control_ctx.delivered_fps = fps;
+	if (ps && fps)
+		__atomic_store_n(&ps->video.rtp_frame_ticks,
+			rtp_session_frame_ticks(fps), __ATOMIC_RELAXED);
 }
 
 static int apply_fps(uint32_t fps)
@@ -594,7 +610,7 @@ static int apply_fps(uint32_t fps)
 		MI_SYS_BindChnPort2(&g_star6e_control_ctx.vpe_port,
 			&g_star6e_control_ctx.venc_port, sensor_fps, sensor_fps,
 			I6_SYS_LINK_FRAMEBASE, 0);
-		g_star6e_control_ctx.delivered_fps = running;
+		set_delivered_fps(running);
 		return -1;
 	}
 
@@ -610,7 +626,7 @@ static int apply_fps(uint32_t fps)
 		MI_SYS_BindChnPort2(&g_star6e_control_ctx.vpe_port,
 			&g_star6e_control_ctx.venc_port, sensor_fps, sensor_fps,
 			I6_SYS_LINK_FRAMEBASE, 0);
-		g_star6e_control_ctx.delivered_fps = running;
+		set_delivered_fps(running);
 		return -1;
 	}
 
@@ -623,7 +639,7 @@ static int apply_fps(uint32_t fps)
 		uint32_t cfg_kbps = g_star6e_control_ctx.vcfg ?
 			g_star6e_control_ctx.vcfg->video0.bitrate : 0;
 
-		g_star6e_control_ctx.delivered_fps = fps;
+		set_delivered_fps(fps);
 		if (cfg_kbps > 0 &&
 		    rc_compensate_kbps(cfg_kbps, old_delivered) !=
 		    rc_compensate_kbps(cfg_kbps, fps))
@@ -639,6 +655,7 @@ static int apply_fps(uint32_t fps)
 	 * apply_fps_live(). */
 	printf("> FPS delivered %u, RC fpsNum %u (bind %u:%u)\n", fps, rc_fps,
 		sensor_fps, fps);
+	fflush(stdout); /* Star6E stdout is block-buffered into the log */
 	return 0;
 }
 
