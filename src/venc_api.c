@@ -534,7 +534,7 @@ static const FieldUi ui_outgoing_fec = {
 	"Outgoing", "RS parity (FEC)", "toggle", 0, 0, 0, NULL,
 	"Send Reed-Solomon parity after each frame so a receiver with the decoder can "
 	"rebuild lost packets. video0.bitrate stays the total: the encoder gets "
-	"4/5, parity the rest. RTP over udp:// or unix://, maxPayloadSize <= 1400. "
+	"4/5, parity the rest. RTP over udp:// or unix://, maxPayloadSize <= 3780. "
 	"Live: a toggle re-programs the bitrate, which costs one IDR."
 };
 static const FieldUi ui_qr_tap_enabled = {
@@ -1556,7 +1556,7 @@ static const char *validate_field_cfg(const VencConfig *cfg, const char *key)
 /* outgoing.fec couples three outgoing keys, so it is checked once on the
  * whole staged config, never per key: `fec=true&maxPayloadSize=1400` must
  * pass in either order.  Parity rides the udp:// / unix:// RTP path and must
- * fit 1420 B; on shm it would cost 1/5 of the encoder rate and send nothing. */
+ * fit 3800 B; on shm it would cost 1/5 of the encoder rate and send nothing. */
 static const char *validate_fec_cfg(const VencConfig *cfg)
 {
 	VencOutputUri uri;
@@ -1564,7 +1564,7 @@ static const char *validate_fec_cfg(const VencConfig *cfg)
 	if (!cfg->outgoing.fec)
 		return NULL;
 	if (cfg->outgoing.max_payload_size > VENC_FEC_MAX_PAYLOAD_BYTES)
-		return "outgoing.fec requires outgoing.max_payload_size <= 1400";
+		return "outgoing.fec requires outgoing.max_payload_size <= 3780";
 	if (strcmp(cfg->outgoing.stream_mode, "rtp") != 0)
 		return "outgoing.fec requires outgoing.stream_mode=rtp";
 	if (cfg->outgoing.server[0] &&

@@ -2257,7 +2257,7 @@ static int test_frame_gate_loaded_config_bounds(void)
 	return failures;
 }
 
-/* outgoing.fec rides the RTP socket path only and must fit 1420 B
+/* outgoing.fec rides the RTP socket path only and must fit 3800 B
  * (protocols/venc-fec.md): every rule, plus the fec-off control. */
 static int test_outgoing_fec_validation(void)
 {
@@ -2270,7 +2270,8 @@ static int test_outgoing_fec_validation(void)
 		{ "fec udp 1400", "udp://127.0.0.1:5600", "rtp", 1400, true, true },
 		{ "fec unix 1400", "unix://now-video", "rtp", 1400, true, true },
 		{ "fec no server", "", "rtp", 1400, true, true },
-		{ "fec 1401 B", "udp://127.0.0.1:5600", "rtp", 1401, true, false },
+		{ "fec 3780 B", "udp://127.0.0.1:5600", "rtp", 3780, true, true },
+		{ "fec 3781 B", "udp://127.0.0.1:5600", "rtp", 3781, true, false },
 		{ "fec shm", "shm://x", "rtp", 1400, true, false },
 		{ "fec frame-shm", "frame-shm://x", "rtp", 1400, true, false },
 		{ "fec compact", "udp://127.0.0.1:5600", "compact", 1400, true, false },
@@ -2332,9 +2333,9 @@ static int test_outgoing_fec_live(void)
 			"outgoing.fec=true&outgoing.maxPayloadSize=1400", &status,
 			response, sizeof(response)) == 0 && status == 200 &&
 		g_fec_calls == 1 && g_fec_last && cfg.outgoing.fec);
-	CHECK("fec live: payload past 1400 with fec on rejected",
+	CHECK("fec live: payload past 3780 with fec on rejected",
 		apply_set_query_http(&cfg, "star6e", &cb,
-			"outgoing.maxPayloadSize=1500", &status, response,
+			"outgoing.maxPayloadSize=3781", &status, response,
 			sizeof(response)) == 0 && status == 409 &&
 		cfg.outgoing.max_payload_size == 1400);
 	CHECK("fec live: off",

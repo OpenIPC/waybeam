@@ -457,6 +457,13 @@ static int test_star6e_output_fec(void)
 		parity >= 3 && ks[0] == 34 && ks[1] == 33 && ks[2] == 33);
 	seq = (uint16_t)(seq + 100);
 
+	/* Small packets in slots that still hold the frame above's larger
+	 * ones: padding is to the block's own longest, byte-exact. */
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_small, pkts, lens, 256);
+	CHECK("fec on: stale larger slots never leak into parity",
+		fec_check_parity(pkts, lens, n, 12, seq, fec_len_small, NULL) >= 1);
+	seq = (uint16_t)(seq + 12);
+
 	/* Ratio: parity datagram bytes stay at 1/4 of source datagram bytes,
 	 * including 1-3 packet frames where r is mostly 0. */
 	for (unsigned f = 0; f < 3000; f++) {

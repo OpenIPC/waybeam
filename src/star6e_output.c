@@ -852,7 +852,6 @@ static void star6e_fec_capture(Star6eOutput *output, const uint8_t *header,
 	memcpy(sym + 2, payload1, payload1_len);
 	if (payload2_len)
 		memcpy(sym + 2 + payload1_len, payload2, payload2_len);
-	memset(sym + 2 + len, 0, VENC_FEC_MAX_PAYLOAD_BYTES - len);
 	output->fec_count++;
 }
 
@@ -900,6 +899,14 @@ static void star6e_fec_emit(Star6eOutput *output)
 		if (!r)
 			__atomic_fetch_add(&output->fec_unprotected, k,
 				__ATOMIC_RELAXED);
+		/* Zero-pad to this block's longest only, not the 3780 cap. */
+		for (i = 0; r && i < k; i++) {
+			uint8_t *s = output->fec_arena +
+				(size_t)(first + i) * STAR6E_FEC_SYM_MAX;
+
+			memset(s + 2 + star6e_read_be16(s), 0,
+				maxlen - star6e_read_be16(s));
+		}
 
 		par[0] = 0x7E; /* H.265 NAL type 63: decoders ignore it */
 		par[1] = (uint8_t)((b == nb - 1 && output->fec_frame == 1 ?

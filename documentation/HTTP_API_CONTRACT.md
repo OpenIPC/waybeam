@@ -666,12 +666,12 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
 - `outgoing.fec`: Live boolean, default `false`. Star6E only (advertised
   unsupported on Maruko and CV610). Sends Reed–Solomon parity after each frame's
   packets on the same socket, per `protocols/venc-fec.md` in the coordination repo:
-  PT 100, its own SSRC and sequence space, at most 1420 B per datagram, 25 % of the
+  PT 100, its own SSRC and sequence space, at most 3800 B per datagram, 25 % of the
   video. `video0.bitrate` stays the **total** on the wire: the encoder is programmed
   with 4/5 of it (at startup and on every live write), parity takes the rest.
   Requires `streamMode=rtp`, a `udp://` or `unix://` server (or none yet), and
-  `maxPayloadSize <= 1400`; those combinations are rejected, including a live
-  `maxPayloadSize` above 1400 while it is on. The rule is checked on the whole
+  `maxPayloadSize <= 3780`; those combinations are rejected, including a live
+  `maxPayloadSize` above 3780 while it is on. The rule is checked on the whole
   request, so `fec=true&maxPayloadSize=1400` is accepted in either order. A live
   toggle re-programs the encoder bitrate (one IDR) and parity starts or stops at
   the next frame boundary; a toggle never splits a frame.

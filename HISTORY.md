@@ -8,7 +8,7 @@ once with no retries (a link in a no-ACK broadcast mode).
 - **New `outgoing.fec`** (Star6E, live, default off). After each frame's
   packets venc sends RS parity on the same socket, as specified in
   `protocols/venc-fec.md` (coordination repo): PT 100, its own SSRC and
-  sequence space, blocks of at most 40 packets, at most 1420 B per datagram.
+  sequence space, blocks of at most 40 packets, at most 3800 B per datagram (payload <= 3780; the default 1400 gives 1420).
   A receiver with the decoder rebuilds lost packets byte for byte; one without
   it drops PT 100, and the 6-byte header doubles as an H.265 NAL of type 63,
   which a decoder ignores if a depayloader passes it through.
@@ -18,7 +18,7 @@ once with no retries (a link in a no-ACK broadcast mode).
   video, so frames of one to three packets share protection rather than
   overspend.
 - **Live toggle.** Turning it on or off re-programs the encoder bitrate,
-  which costs one IDR, and takes effect at the next frame; the 360 KB parity
+  which costs one IDR, and takes effect at the next frame; the ~970 KB parity
   buffer is allocated on the first enable and kept. The FEC rule is checked
   on the whole request, so `fec=true&maxPayloadSize=1400` works in one call.
 - Parity uses the Cauchy code of waybeam-link (PROTOCOL.md §14.1), ported to
