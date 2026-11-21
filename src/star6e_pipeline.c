@@ -466,17 +466,33 @@ void star6e_pipeline_cus3a_reset(void)
  * ISP exposure limit, not the sensor timing register, so re-issue SetFps once
  * from the run loop ~1.5s after start, after the bin load + AE converge, to
  * force the sensor register to the target.  No-op when fps is 0. */
-void star6e_pipeline_cold_boot_fps_rekick(const Star6ePipelineState *state,
+void star6e_pipeline_cold_boot_fps_rekick(Star6ePipelineState *state,
 	const VencConfig *vcfg)
 {
-	if (!state || !vcfg)
+	if (!state || !vcfg || state->sensor.fps == 0)
 		return;
-	if (state->sensor.fps == 0)
-		return;
-	printf("[waybeam] cold-boot fps re-kick: SetFps(%u)\n",
-		state->sensor.fps);
-	fflush(stdout);
-	MI_SNR_SetFps(state->sensor.pad_id, state->sensor.fps);
+	fprintf(stderr, "[waybeam] cold-boot fps re-kick\n");
+	(void)star6e_pipeline_set_sensor_fps(state, 0);
+}
+
+/* One lock for every run-time MI_SNR_SetFps: the cold-boot re-kick (run
+ * loop) and a live fps raise (HTTP thread) must not interleave, or the
+ * re-kick can land the old rate after the raise.  fps 0 re-kicks the
+ * current rate, read under the lock. */
+static pthread_mutex_t g_sensor_fps_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int star6e_pipeline_set_sensor_fps(Star6ePipelineState *state, uint32_t fps)
+{
+	int ret;
+
+	pthread_mutex_lock(&g_sensor_fps_lock);
+	if (fps == 0)
+		fps = state->sensor.fps;
+	ret = fps ? MI_SNR_SetFps(state->sensor.pad_id, fps) : 0;
+	if (ret == 0)
+		state->sensor.fps = fps;
+	pthread_mutex_unlock(&g_sensor_fps_lock);
+	return ret;
 }
 
 /* Which algorithm owns AWB.  1 = handed to userspace (our star6e_awb loop
@@ -2084,8 +2100,9 @@ int star6e_pipeline_load_isp_bin_live(const char *configured_path,
 	/* Bin can reset MI_ISP_AE_SetExposureLimit to its own defaults; reapply
 	 * the FPS cap so AE doesn't relock to a shutter longer than the frame
 	 * period.  Same logic as bind_and_finalize_pipeline. */
-	if (vcfg->video0.fps > 0)
-		star6e_pipeline_cap_exposure_for_fps(vcfg->video0.fps,
+	if (sensor_framerate > 0 || vcfg->video0.fps > 0)
+		star6e_pipeline_cap_exposure_for_fps(sensor_framerate > 0 ?
+			sensor_framerate : vcfg->video0.fps,
 			vcfg->isp.shutter_rule_180);
 
 	/* The ISP bin's AE writes the bin's cold-boot shutter (often ~100 ms)
