@@ -483,6 +483,10 @@ static void fec_hook_give_up(Star6eOutput *output)
 {
 	output->batch.discard_remaining = 1; /* as after ENOBUFS / budget */
 }
+static void fec_hook_no_budget(Star6eOutput *output)
+{
+	output->batch.flush_budget_us = 0; /* the flush sends, then gives up */
+}
 
 /* Live outgoing.fec: a toggle takes effect at the next frame and never
  * splits one; a frame past STAR6E_FEC_MAX_SRC keeps its first 256 protected
@@ -534,8 +538,16 @@ static int test_star6e_output_fec_live(void)
 	CHECK("fec live: no parity after the video flush gave up",
 		n == 0 && output.fec_parity_pkts == par &&
 		output.socket_drops - drops == 12 && /* video only */
-		output.fec_unprotected - unprot == 12);
+		output.fec_unprotected == unprot); /* refused, not unprotected */
 	seq = (uint16_t)(seq + 12);
+	unprot = output.fec_unprotected;
+	g_fec_hook = fec_hook_no_budget;
+	g_fec_hook_at = 0;
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: budget spent, video whole -> 12 unprotected, no parity",
+		n == 12 && output.fec_unprotected - unprot == 12);
+	seq = (uint16_t)(seq + 12);
+	par = output.fec_parity_pkts;
 	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
 	CHECK("fec live: parity counted as sent",
 		n > 12 && output.fec_parity_pkts - par == (uint32_t)(n - 12));

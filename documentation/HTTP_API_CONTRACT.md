@@ -1658,7 +1658,7 @@ Field reference:
 | `pressureDrops` | Frames dropped by the in-process backpressure path while a sidecar probe was subscribed |
 | `packetsSent` | Lifetime sends accepted: ring writes on `shm://`, datagrams on `udp://`/`unix://`.  Absent on `frame-shm://`, which reports whole frames as `framesSent` instead |
 | `fecParityPkts` | (`udp`/`unix` only) Lifetime RS parity datagrams that reached the socket (`outgoing.fec`); included in `packetsSent`. No parity is built for a frame whose video flush already gave up, so a parity drop in `transportDrops` means the socket refused parity after the video went out |
-| `fecUnprotected` | (`udp`/`unix` only) Lifetime source packets sent with no parity: blocks whose 25 % byte credit bought none (small frames share protection) or packets past the 256-per-frame cap (the first 256 stay protected) |
+| `fecUnprotected` | (`udp`/`unix` only) Lifetime source packets sent with no parity: blocks whose 25 % byte credit bought none (small frames share protection) packets past the 256-per-frame cap (the first 256 stay protected), or frames that went out whole after the 4 ms flush budget ran out (no parity is built then). Packets the socket refused are `transportDrops`, never counted here |
 | `framesSent` | (`frame-shm` only) Lifetime whole frames written into the ring.  The `frame-shm` counterpart of `packetsSent`: this transport carries one access unit per slot, not packets |
 | `oversizeDrops` | (SHM only) Frames rejected for exceeding slot capacity |
 | `slotCount` / `usedSlots` | (SHM only) Ring sizing; `usedSlots` is a snapshot |

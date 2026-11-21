@@ -756,6 +756,13 @@ static int star6e_batch_flush(Star6eOutput *output)
 	return (int)sent_total;
 }
 
+/* Video datagrams this output has failed to send, by any cause. */
+static uint32_t star6e_output_lost(const Star6eOutput *output)
+{
+	return __atomic_load_n(&output->socket_drops, __ATOMIC_RELAXED) +
+		output->send_errors;
+}
+
 void star6e_output_begin_frame(Star6eOutput *output)
 {
 	Star6eOutputBatch *b;
@@ -769,6 +776,7 @@ void star6e_output_begin_frame(Star6eOutput *output)
 	output->fec_count = 0;
 	/* Latched per frame so a live toggle never splits one. */
 	output->fec_frame = __atomic_load_n(&output->fec_on, __ATOMIC_ACQUIRE);
+	output->fec_lost0 = star6e_output_lost(output);
 	b->flush_budget_us = STAR6E_OUTPUT_FLUSH_BUDGET_US;
 	b->discard_remaining = 0;
 	b->discard_as_error = 0;
@@ -916,15 +924,17 @@ int star6e_output_end_frame(Star6eOutput *output)
 
 	if (!output || !output->batch.active)
 		return 0;
-	/* Video first, so the frame never waits on its parity encode; none,
-	 * counted unprotected, once the frame's budget is spent or the socket
-	 * gave up -- even if every video packet went out.  fec_count is 0 unless
+	/* Video first, so the frame never waits on its parity encode.  No
+	 * parity once the frame's budget is spent or the socket gave up; the
+	 * frame counts as unprotected only if its video all went out, since a
+	 * refused packet is already a transport drop.  fec_count is 0 unless
 	 * fec_frame latched on.  Parity is counted as it reaches the socket. */
 	sent = star6e_batch_flush(output);
-	if (output->fec_count && output->batch.discard_remaining)
-		__atomic_fetch_add(&output->fec_unprotected, output->fec_count,
-			__ATOMIC_RELAXED);
-	else if (output->fec_count) {
+	if (output->fec_count && output->batch.discard_remaining) {
+		if (star6e_output_lost(output) == output->fec_lost0)
+			__atomic_fetch_add(&output->fec_unprotected,
+				output->fec_count, __ATOMIC_RELAXED);
+	} else if (output->fec_count) {
 		const uint32_t w0 = __atomic_load_n(&output->socket_writes,
 			__ATOMIC_RELAXED);
 

@@ -126,6 +126,7 @@ typedef struct {
 	int fec_frame;
 	uint8_t *fec_arena; /* allocated on first enable, kept until teardown */
 	uint16_t fec_count;
+	uint32_t fec_lost0; /* socket_drops + send_errors at begin_frame */
 	uint16_t fec_base_seq;
 	RtpPacketizerState fec_rtp;
 	int64_t fec_credit; /* parity bytes owed, x VENC_FEC_PARITY_DIV */
