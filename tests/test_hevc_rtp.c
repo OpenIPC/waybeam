@@ -341,8 +341,8 @@ static size_t annexb_put(uint8_t *buf, size_t at, int long_code, uint8_t type,
 	return at + len;
 }
 
-/* hevc_rtp_send_annexb: slices split on start codes, joined only when that
- * saves a packet; VPS/SPS/PPS once per IRAP picture; marker on the end. */
+/* hevc_rtp_send_annexb: one NAL per slice; VPS/SPS/PPS once per IRAP
+ * picture; marker on the end. */
 static int test_hevc_rtp_send_annexb(void)
 {
 	static uint8_t buf[4096];
@@ -357,8 +357,8 @@ static int test_hevc_rtp_send_annexb(void)
 	int failures = 0;
 	size_t n;
 
-	/* Two 1000 B slices: joining saves nothing, so two NALs; the 4-byte
-	 * start code's leading zero does not stick to the first slice. */
+	/* Two 1000 B slices, two NALs; the 4-byte start code's leading zero
+	 * does not stick to the first slice. */
 	n = annexb_put(buf, 0, 1, 1, 1, 1000);
 	n = annexb_put(buf, n, 1, 1, 0, 1000);
 	memset(&cap, 0, sizeof(cap));
@@ -372,19 +372,19 @@ static int test_hevc_rtp_send_annexb(void)
 		!rtp_marker_set(cap.packets[0].header) &&
 		rtp_marker_set(cap.packets[1].header));
 
-	/* 1500 + 100: apart 2 + 1 packets, joined (start code inside) 2. */
+	/* 1500 + 100: never joined -- an FU pair, then the small slice alone. */
 	n = annexb_put(buf, 0, 0, 1, 1, 1500);
 	n = annexb_put(buf, n, 0, 1, 0, 100);
 	memset(&cap, 0, sizeof(cap));
 	hevc_rtp_send_annexb(buf, n, NULL, &rtp, capture_write, &cap, 1, 1400,
 		NULL);
-	CHECK("annexb: small tail joins when it saves a packet",
-		cap.count == 2 && pkt_nal_type(&cap.packets[0]) == 49 &&
+	CHECK("annexb: every slice its own NAL, even when joining saves a packet",
+		cap.count == 3 && pkt_nal_type(&cap.packets[0]) == 49 &&
 		pkt_nal_type(&cap.packets[1]) == 49 &&
-		cap.packets[0].payload_len + cap.packets[1].payload_len ==
-		1500 + 3 + 100 - 2 + 2 * 3);
+		cap.packets[2].payload_len == 100 &&
+		rtp_marker_set(cap.packets[2].header));
 
-	/* Parameter sets are never joined to each other or to a slice. */
+	/* Parameter sets each go out as their own NAL. */
 	n = annexb_put(buf, 0, 1, 32, 0, 24);
 	n = annexb_put(buf, n, 1, 33, 0, 40);
 	n = annexb_put(buf, n, 1, 34, 0, 8);
