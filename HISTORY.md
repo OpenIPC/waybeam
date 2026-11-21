@@ -3,7 +3,7 @@
 ## [0.87.0] - 2026-11-21
 
 Optional Reed–Solomon parity on the RTP output, for links that air each frame
-once with no retries (waybeam-now blind mode).
+once with no retries (a link in a no-ACK broadcast mode).
 
 - **New `outgoing.fec`** (Star6E, live, default off). After each frame's
   packets venc sends RS parity on the same socket, as specified in

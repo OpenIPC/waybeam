@@ -532,7 +532,7 @@ static const FieldUi ui_snapshot_height = {
 };
 static const FieldUi ui_outgoing_fec = {
 	"Outgoing", "RS parity (FEC)", "toggle", 0, 0, 0, NULL,
-	"Send Reed-Solomon parity after each frame so a waybeam-now ground can "
+	"Send Reed-Solomon parity after each frame so a receiver with the decoder can "
 	"rebuild lost packets. video0.bitrate stays the total: the encoder gets "
 	"4/5, parity the rest. RTP over udp:// or unix://, maxPayloadSize <= 1400. "
 	"Live: a toggle re-programs the bitrate, which costs one IDR."
