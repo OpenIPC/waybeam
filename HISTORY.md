@@ -9,8 +9,8 @@ CV610 drives an IMX335 on a board that routes two CSI-2 lanes.
   MIPI-RX PHY lanes 0 and 2 that is not a degraded picture but none: the
   receiver counts CRC errors, measures a 0x0 frame, and the encoder emits
   nothing. The new row is the same part and plugin with the board's wiring
-  and the modes two lanes can carry: 2592x1944 RAW10 at 30 fps (the plugin's
-  mode 6, Sony's two-lane setting) and at 45 fps (mode 7).
+  and the modes two lanes can carry: 2592x1944 RAW10 at 30, 40 and 45 fps
+  (the plugin's modes 6 to 8) and a 2560x1440 window at 60 fps (mode 9).
 - **A sensor row now carries the lane wiring** (`lane_id[]`, the PHY lane for
   each data lane) and **a mode can name the plugin mode it needs**
   (`sns_mode`, passed as `ot_isp_pub_attr.sns_mode`). The existing rows keep
@@ -20,19 +20,25 @@ CV610 drives an IMX335 on a board that routes two CSI-2 lanes.
   u-boot `sensor` name has to stay one sys_config knows (`imx335`), so it
   cannot reach this row; `S95waybeam` already takes a preset `$SENSOR` ahead
   of u-boot's.
-- **45 fps is outside the vendor tables.** It runs the sensor's clock tree
-  12.5% fast and is 5.5% under what the SoC's 264 MHz ISP clock passes at
-  5 MP. `video0.fps` up to 30 keeps the vendor mode; only a higher request
-  reaches it. Native 2592x1944 output reaches about 43 fps at that setting;
-  scaled output holds 45.
-- **`documentation/CV610_IMX335_2LANE_FPS_TESTS.md`** records how the limits
-  were found — including that an HMAX below 426 destroys the picture while
-  every MIPI, VI and encoder counter stays clean, so only a snapshot shows it.
-- Needs openhisilicon's `sony_imx335` with modes 6 and 7; an older plugin
+- **Only 30 fps is a vendor setting.** `video0.fps` up to 30 keeps it. 40 fps
+  shortens the line on Sony's clocks. 45 fps and the window also run the
+  sensor's clock tree 6.25% fast, which is as far as the picture allows: from
+  9.4% a well-lit scene shows pattern noise in its dark areas.
+- **Above 45 fps the picture is a window.** The 60 fps mode reads 2560x1440,
+  74% of the sensor's height, so the vertical field of view narrows, and the
+  plugin refuses vertical flip there. It is chosen only for a `video0.size`
+  it can fill; a 2592x1944 output stays at 45 fps.
+- **`documentation/CV610_IMX335_2LANE_FPS_TESTS.md`** records the limits
+  behind each setting — including that an HMAX below 426 destroys the picture
+  while every MIPI, VI and encoder counter stays clean, and that a sensor PLL
+  setting can pass at night and in room light and still fail in daylight.
+- Needs openhisilicon's `sony_imx335` with modes 6 to 9; an older plugin
   ignores the hint and programs a four-lane table.
-- Device-run by hand on a stock OpenIPC image's modules: 45.00 fps for
-  3 minutes at 1920x1080 with `isp.keepAspect=false`, no MIPI error, every
-  snapshot clean; 29.97 fps on mode 6; mirror+flip; 22.5 MiB of MMZ. The init
+- Device-run by hand on a stock OpenIPC image's modules, 1920x1080 with
+  `isp.keepAspect=false`, daylight: 30.01, 40.06, 45.04 and 60.01 fps on the
+  four modes, no MIPI error, snapshots clean; 60 fps for 3 minutes;
+  mirror+flip at 45 fps; 21.9 MiB of MMZ. Native-size output is
+  encoder-bound (about 43 fps at 2592x1944, 58 at 2560x1440). The init
   script and `load-cv610-online` were **not** exercised on that craft, and no
   IMX662 or four-lane IMX335 board was available to re-run those rows.
 

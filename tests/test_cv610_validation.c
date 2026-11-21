@@ -309,25 +309,47 @@ static int test_sensor_table(void)
 			two->lane_id[2] == -1 && two->lane_id[3] == -1);
 		/* The plugin never picks its two-lane modes from size and rate, so
 		 * each row has to name one. */
-		failures += expect("sns_imx335_2l_modes", two->mode_count == 2 &&
+		failures += expect("sns_imx335_2l_modes", two->mode_count == 4 &&
 			two->modes[0].fps == 30 && two->modes[0].sns_mode == 6 &&
-			two->modes[1].fps == 45 && two->modes[1].sns_mode == 7);
+			two->modes[1].fps == 40 && two->modes[1].sns_mode == 7 &&
+			two->modes[2].fps == 45 && two->modes[2].sns_mode == 8 &&
+			two->modes[3].fps == 60 && two->modes[3].sns_mode == 9);
 		for (j = 0; j < two->mode_count; j++)
 			failures += expect("sns_imx335_2l_mode_sane",
-				two->modes[j].width == 2592 &&
-				two->modes[j].height == 1944 &&
 				two->modes[j].raw_bit == 10 &&
 				two->modes[j].sensor_clock_hz == 37125000u);
+		/* Three rates read the whole sensor; the fastest is a window. */
+		for (j = 0; j < 3; j++)
+			failures += expect("sns_imx335_2l_full_sensor",
+				two->modes[j].width == 2592 &&
+				two->modes[j].height == 1944);
+		failures += expect("sns_imx335_2l_window",
+			two->modes[3].width == 2560 && two->modes[3].height == 1440);
 		/* 30 fps is Sony's setting and must stay what a 30 fps config gets;
-		 * the 45 fps row runs the sensor past the vendor tables and is
-		 * reached only by asking for more. */
+		 * the faster rows leave the vendor tables and are reached only by
+		 * asking for more. */
 		failures += expect("sns_imx335_2l_30_is_vendor_mode",
 			cv610_mode_select(two, -1, 30, 0, 0, &idx) == &two->modes[0] &&
 			cv610_mode_select(two, -1, 25, 0, 0, &idx) == &two->modes[0]);
-		failures += expect("sns_imx335_2l_above_30_is_45",
+		failures += expect("sns_imx335_2l_exact_rates",
 			cv610_mode_select(two, -1, 40, 0, 0, &idx) == &two->modes[1] &&
 			idx == 1 &&
-			cv610_mode_select(two, -1, 100, 0, 0, &idx) == &two->modes[1]);
+			cv610_mode_select(two, -1, 45, 0, 0, &idx) == &two->modes[2] &&
+			cv610_mode_select(two, -1, 60, 1920, 1080, &idx) ==
+				&two->modes[3] && idx == 3);
+		/* Between rows the next faster one answers; past the last, the
+		 * fastest. */
+		failures += expect("sns_imx335_2l_between_rates",
+			cv610_mode_select(two, -1, 35, 0, 0, &idx) == &two->modes[1] &&
+			cv610_mode_select(two, -1, 50, 0, 0, &idx) == &two->modes[3] &&
+			cv610_mode_select(two, -1, 100, 0, 0, &idx) == &two->modes[3]);
+		/* The window cannot fill an output larger than itself, so a
+		 * full-sensor output keeps the full sensor and its 45 fps. */
+		failures += expect("sns_imx335_2l_window_never_upscales",
+			cv610_mode_select(two, -1, 60, 2592, 1944, &idx) ==
+				&two->modes[2] &&
+			cv610_mode_select(two, -1, 60, 2560, 1440, &idx) ==
+				&two->modes[3]);
 		setenv("SENSOR", "imx335_2l", 1);
 		failures += expect("sns_current_imx335_2l",
 			cv610_sensor_current() == two);
