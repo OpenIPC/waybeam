@@ -527,10 +527,11 @@ static int test_hevc_rtp_param_set_helpers(void)
 		pkt_nal_type(&cap.packets[4]) == 19 &&
 		pkt_nal_type(&cap.packets[5]) == 19);
 
-	/* A send that fails mid-set (the SPS) leaves the set incomplete, so the
-	 * next IDR without in-band sets still gets ours. */
+	/* All three in-band sets, the SPS refused: the set is incomplete, so
+	 * the next IDR without in-band sets still gets ours. */
 	n = annexb_put(buf, 0, 1, 32, 0, 24);
 	n = annexb_put(buf, n, 1, 33, 0, 40);
+	n = annexb_put(buf, n, 1, 34, 0, 8);
 	memset(&cap, 0, sizeof(cap));
 	cap.fail_call = 2;
 	(void)walk_with_param_helpers(buf, n, &params, &rtp, &cap);
