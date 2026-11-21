@@ -520,9 +520,18 @@ static int apply_scene_fps(uint32_t fps)
 /* The sensor delivers the rate it was last PROGRAMMED to (MI_SNR_SetFps at
  * startup: video0.fps), not the mode max, and the VPE->VENC bind can only
  * drop frames, so a live raise above the programmed rate re-programs it.
- * Exposure cap first, so AE never holds a shutter longer than the new
- * period; the 180-degree AE pin and the orientation follow the new rate.
- * A lower rate keeps the sensor where it is and decimates, as before. */
+ * When raising, the 180-degree AE pin and the exposure cap move first, so
+ * AE never holds a shutter longer than the new period (the cus3a thread
+ * re-writes the pin every tick); when lowering (a rollback), after.  The
+ * orientation follows the new rate.  A lower live rate keeps the sensor
+ * where it is and decimates, as before. */
+static void cap_exposure_for_fps(uint32_t fps, int rule_180)
+{
+	if (rule_180 && star6e_cus3a_running())
+		star6e_cus3a_set_shutter_max(1000000 / (fps * 2));
+	(void)star6e_pipeline_cap_exposure_for_fps(fps, rule_180);
+}
+
 static int program_sensor_fps(uint32_t fps)
 {
 	Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
@@ -532,16 +541,14 @@ static int program_sensor_fps(uint32_t fps)
 	const int lower = fps < prev; /* a rollback: cap after the rate drops */
 
 	if (!lower)
-		(void)star6e_pipeline_cap_exposure_for_fps(fps, rule_180);
+		cap_exposure_for_fps(fps, rule_180);
 	if (star6e_pipeline_set_sensor_fps(ps, fps) != 0) {
 		if (!lower)
-			(void)star6e_pipeline_cap_exposure_for_fps(prev, rule_180);
+			cap_exposure_for_fps(prev, rule_180);
 		return -1;
 	}
 	if (lower)
-		(void)star6e_pipeline_cap_exposure_for_fps(fps, rule_180);
-	if (rule_180 && star6e_cus3a_running())
-		star6e_cus3a_set_shutter_max(1000000 / (fps * 2));
+		cap_exposure_for_fps(fps, rule_180);
 	/* SetFps can reset the orientation registers on some sensors. */
 	if (vcfg && (vcfg->image.mirror || vcfg->image.flip))
 		(void)MI_SNR_SetOrien(ps->sensor.pad_id,

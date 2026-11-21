@@ -1,5 +1,16 @@
 # History
 
+## [0.88.1] - 2026-11-21
+
+Star6E: with `isp.shutterRule180`, a live fps raise moves the 180-degree
+shutter pin before the sensor rate, not after. The AE thread re-writes the
+pin's floor on every tick, so once the cap had moved it could write the old,
+longer floor back above the new ceiling, and that held until the tick after
+the late pin update. On a raise of more than 2x (30 -> 100, an old pin of
+16667 us against a 10000 us period), AE briefly held a shutter longer than a
+frame. Same order as Maruko since 0.87.5. A refused raise also puts the pin
+back with the cap.
+
 ## [0.88.0] - 2026-11-21
 
 CV610: RS parity (`outgoing.fec`), the same as Star6E, for flying the CV610
