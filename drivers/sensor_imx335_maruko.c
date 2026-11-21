@@ -1319,10 +1319,11 @@ static int pCus_SetFPS(ms_cus_sensor* handle, u32 fps)
         return FAIL;
     }
 
-    if (params->expo.expo_lines > params->expo.vts - 2) {
-        params->expo.vts = params->expo.expo_lines + 8;
-    }
-
+    /* The base frame length stays the rate's.  It used to become the
+     * current exposure + 8 when that was longer, permanently: a raise from
+     * 30 to 100 fps under a 33 ms shutter then stayed at 30 fps after AE
+     * shortened it.  pCus_SetAEUSecs() stretches a long exposure per frame,
+     * bounded to 120 % of this base. */
     pCus_SetAEUSecs(handle, params->expo.expo_lef_us);
     params->dirty = true;
     return SUCCESS;
@@ -1452,7 +1453,7 @@ static int pCus_GetAEMinMaxUSecs(ms_cus_sensor* handle, u32* min, u32* max)
 {
     u32 cur = handle->video_res_supported.ulcur_res;
     *min = 1;
-    *max = 1000000 / imx335_mipi_linear[cur].senout.max_fps;
+    *max = 1000000 / imx335_mipi_linear[cur].senout.min_fps;
     return SUCCESS;
 }
 
@@ -1466,7 +1467,7 @@ static int pCus_GetAEMinMaxGain(ms_cus_sensor* handle, u32* min, u32* max)
 static int IMX335_GetShutterInfo(struct __ms_cus_sensor* handle, CUS_SHUTTER_INFO* info)
 {
     u32 cur = handle->video_res_supported.ulcur_res;
-    info->max = 1000000000 / imx335_mipi_linear[cur].senout.max_fps;
+    info->max = 1000000000 / imx335_mipi_linear[cur].senout.min_fps;
     info->min = (Preview_line_period * 1);
     info->step = Preview_line_period;
     return SUCCESS;
