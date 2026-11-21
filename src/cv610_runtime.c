@@ -1662,13 +1662,10 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 
 		nal_type = h26x_util_hevc_nalu_type(nal, nal_len);
 		nal_count++;
-		h26x_param_sets_update(&ctx->param_sets, PT_H265, nal_type,
-			nal, nal_len);
 		is_last = cursor == len;
-		if (nal_type == 19 || nal_type == 20)
-			(void)hevc_rtp_prepend_param_sets(&ctx->param_sets, nal_type,
-				&ctx->rtp, cv610_output_write, ctx,
-				max_payload, &ctx->rtp_stats);
+		(void)hevc_rtp_param_sets_before(&ctx->param_sets, nal_type,
+			nal, nal_len, &ctx->rtp, cv610_output_write, ctx,
+			max_payload, &ctx->rtp_stats);
 		sent = hevc_rtp_send_nal(nal, nal_len, &ctx->rtp,
 			cv610_output_write, ctx, is_last,
 			max_payload, &ctx->rtp_stats);
@@ -1680,6 +1677,7 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 			status = -1;
 			break;
 		}
+		hevc_rtp_param_sets_sent(&ctx->param_sets, nal_type);
 	}
 	/* An output failure may drop this access unit, but time still advances. */
 	ctx->rtp.timestamp += ctx->frame_ticks;

@@ -57,6 +57,32 @@ size_t hevc_rtp_prepend_param_sets(const H26xParamSets *params, uint8_t nal_type
 	return total_bytes;
 }
 
+size_t hevc_rtp_param_sets_before(H26xParamSets *params, uint8_t type,
+	const uint8_t *nal, size_t nal_len, RtpPacketizerState *rtp,
+	RtpPacketizerWriteFn write_cb, void *opaque, size_t max_payload,
+	HevcRtpStats *stats)
+{
+	size_t total_bytes = 0;
+
+	h26x_param_sets_update(params, PT_H265, type, nal, nal_len);
+	if (type < 32) {
+		/* VPS/SPS/PPS once per IRAP picture, before its first slice
+		 * (first_slice_segment_in_pic_flag), unless the encoder has
+		 * just sent all three. */
+		if (params->inband != 7 && nal_len > 2 && (nal[2] & 0x80))
+			total_bytes = hevc_rtp_prepend_param_sets(params, type,
+				rtp, write_cb, opaque, max_payload, stats);
+		params->inband = 0;
+	}
+	return total_bytes;
+}
+
+void hevc_rtp_param_sets_sent(H26xParamSets *params, uint8_t type)
+{
+	if (type >= 32 && type <= 34)
+		params->inband |= (uint8_t)(1u << (type - 32));
+}
+
 size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 	H26xParamSets *params, RtpPacketizerState *rtp,
 	RtpPacketizerWriteFn write_cb, void *opaque, int is_last,
@@ -84,26 +110,15 @@ size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 			stats->slice_bytes += (uint32_t)nal_len;
 		}
 
-		if (params) {
-			h26x_param_sets_update(params, PT_H265, type, nal, nal_len);
-			if (type < 32) {
-				/* VPS/SPS/PPS once per IRAP picture, before its
-				 * first slice (first_slice_segment_in_pic_flag),
-				 * unless the encoder has just sent all three. */
-				if (params->inband != 7 && nal_len > 2 &&
-				    (nal[2] & 0x80))
-					total_bytes += hevc_rtp_prepend_param_sets(
-						params, type, rtp, write_cb, opaque,
-						max_payload, stats);
-				params->inband = 0;
-			}
-		}
+		if (params)
+			total_bytes += hevc_rtp_param_sets_before(params, type,
+				nal, nal_len, rtp, write_cb, opaque, max_payload,
+				stats);
 		sent = hevc_rtp_send_nal(nal, nal_len, rtp, write_cb, opaque,
 			is_last && !more, max_payload, stats);
 		total_bytes += sent;
-		/* The encoder's own set counts only once it went out. */
-		if (params && sent && type >= 32 && type <= 34)
-			params->inband |= (uint8_t)(1u << (type - 32));
+		if (params && sent)
+			hevc_rtp_param_sets_sent(params, type);
 		if (!more)
 			return total_bytes;
 		nal = next;

@@ -1,4 +1,5 @@
 #include "hevc_rtp.h"
+#include "h26x_util.h"
 
 #include "h26x_param_sets.h"
 #include "rtp_packetizer.h"
@@ -470,6 +471,64 @@ static int test_hevc_rtp_send_annexb(void)
 	return failures;
 }
 
+/* A sender that walks NALs itself (CV610): before/sent around each NAL. */
+static size_t walk_with_param_helpers(const uint8_t *buf, size_t len,
+	H26xParamSets *params, RtpPacketizerState *rtp, CaptureCtx *cap)
+{
+	const uint8_t *nal;
+	size_t nal_len, cursor = 0, total = 0;
+
+	while (h26x_util_annexb_next(buf, len, &cursor, &nal, &nal_len)) {
+		const uint8_t type = h26x_util_hevc_nalu_type(nal, nal_len);
+
+		total += hevc_rtp_param_sets_before(params, type, nal, nal_len,
+			rtp, capture_write, cap, 1400, NULL);
+		if (hevc_rtp_send_nal(nal, nal_len, rtp, capture_write, cap,
+		    cursor == len, 1400, NULL) == nal_len)
+			hevc_rtp_param_sets_sent(params, type);
+	}
+	return total;
+}
+
+static int test_hevc_rtp_param_set_helpers(void)
+{
+	static uint8_t buf[4096];
+	static CaptureCtx cap;
+	H26xParamSets params = {0};
+	RtpPacketizerState rtp = { .seq = 0x600, .timestamp = 0x6000,
+		.ssrc = 0xBEEF, .payload_type = 97 };
+	int failures = 0;
+	size_t n, i;
+
+	/* An IDR picture of 3 slices after the encoder's own VPS/SPS/PPS: the
+	 * old CV610 loop added 3 sets before EVERY slice (9 extra). */
+	n = annexb_put(buf, 0, 1, 32, 0, 24);
+	n = annexb_put(buf, n, 1, 33, 0, 40);
+	n = annexb_put(buf, n, 1, 34, 0, 8);
+	for (i = 0; i < 3; i++)
+		n = annexb_put(buf, n, 1, 19, i == 0, 200);
+	memset(&cap, 0, sizeof(cap));
+	CHECK("param helpers: in-band sets, nothing prepended",
+		walk_with_param_helpers(buf, n, &params, &rtp, &cap) == 0 &&
+		cap.count == 6 && pkt_nal_type(&cap.packets[0]) == 32 &&
+		pkt_nal_type(&cap.packets[3]) == 19);
+
+	/* The next IDR without in-band sets: exactly one prepend, before
+	 * slice 0 only. */
+	n = 0;
+	for (i = 0; i < 3; i++)
+		n = annexb_put(buf, n, 1, 19, i == 0, 200);
+	memset(&cap, 0, sizeof(cap));
+	(void)walk_with_param_helpers(buf, n, &params, &rtp, &cap);
+	CHECK("param helpers: one prepend, before the first slice only",
+		cap.count == 6 && pkt_nal_type(&cap.packets[0]) == 32 &&
+		pkt_nal_type(&cap.packets[2]) == 34 &&
+		pkt_nal_type(&cap.packets[3]) == 19 &&
+		pkt_nal_type(&cap.packets[4]) == 19 &&
+		pkt_nal_type(&cap.packets[5]) == 19);
+	return failures;
+}
+
 int test_hevc_rtp(void)
 {
 	int failures = 0;
@@ -482,5 +541,6 @@ int test_hevc_rtp(void)
 	failures += test_hevc_rtp_null_stats();
 	failures += test_hevc_rtp_single_marker_on_last();
 	failures += test_hevc_rtp_send_annexb();
+	failures += test_hevc_rtp_param_set_helpers();
 	return failures;
 }
