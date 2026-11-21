@@ -22,6 +22,14 @@ Maruko: three exposure and timing fixes.
     so this only matters where that cap is not in force. An explicit
     `isp.shutterMaxUs` longer than the frame period, which the driver used to
     clamp silently, is now honoured and can lower the frame rate.
+  - **IMX335 no longer keeps a stretched frame after a rate change.** Its
+    SetFPS replaced the new rate's frame length with the current exposure's
+    whenever that was longer, permanently, so a live 30 -> 100 raise in a
+    dark scene (shutter at 33 ms) stayed at 30 pictures/s after AE had
+    shortened the shutter. The old 10 ms range could not reach this; the
+    wider one can. Measured in the dark with the fix: 30, a live raise to
+    100, back to 30 and to 100 again all delivered their rate, and a cold
+    boot at 100 delivered 100.
   - The delayed cold-boot SetFps kick re-applies the cap first. The ISP's AE
     init can reset the limits after the startup cap, and with `isp.aeFps=0`
     no thread puts it back. Not reproduced on the bench: there the limit held

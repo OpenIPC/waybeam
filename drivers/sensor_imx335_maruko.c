@@ -1319,10 +1319,11 @@ static int pCus_SetFPS(ms_cus_sensor* handle, u32 fps)
         return FAIL;
     }
 
-    if (params->expo.expo_lines > params->expo.vts - 2) {
-        params->expo.vts = params->expo.expo_lines + 8;
-    }
-
+    /* The base frame length stays the rate's.  It used to become the
+     * current exposure + 8 when that was longer, permanently: a raise from
+     * 30 to 100 fps under a 33 ms shutter then stayed at 30 fps after AE
+     * shortened it.  pCus_SetAEUSecs() stretches a long exposure per frame,
+     * bounded to 120 % of this base. */
     pCus_SetAEUSecs(handle, params->expo.expo_lef_us);
     params->dirty = true;
     return SUCCESS;
