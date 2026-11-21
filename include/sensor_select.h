@@ -60,6 +60,8 @@ struct SensorSelectResult {
 	MI_SNR_PlaneInfo_t plane;
 	MI_SNR_Res_t mode;
 	uint32_t fps;             /* actual fps set on the sensor */
+	int fps_fallback;         /* the requested fps was refused; fps is a
+	                           * fallback, the mode may run at another rate */
 	int mode_index;
 };
 

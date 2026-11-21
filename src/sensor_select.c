@@ -365,6 +365,7 @@ static int set_sensor_fps(MI_SNR_PAD_ID_e pad, MI_U32 mode_index,
 	uint32_t requested_fps = target_fps ? target_fps : 30;
 	uint32_t clamped = sensor_mode_clamp_fps(mode, requested_fps);
 	result->fps = 0;
+	result->fps_fallback = 0;
 
 	MI_S32 err = sensor_try_set_fps(pad, mode_index, clamped, strategy);
 	if (err == 0) {
@@ -381,6 +382,7 @@ static int set_sensor_fps(MI_SNR_PAD_ID_e pad, MI_U32 mode_index,
 		err = sensor_try_set_fps(pad, mode_index, fallback, strategy);
 		if (err == 0) {
 			result->fps = fallback;
+			result->fps_fallback = 1;
 			printf("> Requested %u fps, sensor accepted %u fps "
 				"(mode min %u max %u)\n",
 				requested_fps, fallback, mode->minFps, mode->maxFps);

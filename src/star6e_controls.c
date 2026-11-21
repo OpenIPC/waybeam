@@ -3,6 +3,7 @@
 #include "idr_rate_limit.h"
 #include "output_socket.h"
 #include "pipeline_common.h"
+#include "rtp_session.h"
 #include "star6e_audio.h"
 #include "star6e_awb.h"
 #include "star6e_cus3a.h"
@@ -516,10 +517,105 @@ static int apply_scene_fps(uint32_t fps)
 	return 0;
 }
 
+/* The sensor delivers the rate it was last PROGRAMMED to (MI_SNR_SetFps at
+ * startup: video0.fps), not the mode max, and the VPE->VENC bind can only
+ * drop frames, so a live raise above the programmed rate re-programs it.
+ * Exposure cap first, so AE never holds a shutter longer than the new
+ * period; the 180-degree AE pin and the orientation follow the new rate.
+ * A lower rate keeps the sensor where it is and decimates, as before. */
+static int program_sensor_fps(uint32_t fps)
+{
+	Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
+	const VencConfig *vcfg = g_star6e_control_ctx.vcfg;
+	const int rule_180 = vcfg && vcfg->isp.shutter_rule_180;
+	const uint32_t prev = ps->sensor.fps;
+	const int lower = fps < prev; /* a rollback: cap after the rate drops */
+
+	if (!lower)
+		(void)star6e_pipeline_cap_exposure_for_fps(fps, rule_180);
+	if (star6e_pipeline_set_sensor_fps(ps, fps) != 0) {
+		if (!lower)
+			(void)star6e_pipeline_cap_exposure_for_fps(prev, rule_180);
+		return -1;
+	}
+	if (lower)
+		(void)star6e_pipeline_cap_exposure_for_fps(fps, rule_180);
+	if (rule_180 && star6e_cus3a_running())
+		star6e_cus3a_set_shutter_max(1000000 / (fps * 2));
+	/* SetFps can reset the orientation registers on some sensors. */
+	if (vcfg && (vcfg->image.mirror || vcfg->image.flip))
+		(void)MI_SNR_SetOrien(ps->sensor.pad_id,
+			(uint8_t)(vcfg->image.mirror ? 1 : 0),
+			(uint8_t)(vcfg->image.flip ? 1 : 0));
+	fprintf(stderr, "> Sensor fps %u -> %u, max shutter %uus%s\n", prev,
+		fps, 1000000 / (fps * (rule_180 ? 2 : 1)),
+		rule_180 ? " (180-degree rule, pinned)" : "");
+	return 0;
+}
+
+/* Raise the sensor for a live fps above its programmed rate.  Never on a
+ * sensor whose startup rate was a fallback (fixed-timing modes refuse
+ * SetFps and need a full reset to recover), and once refused, bind-only
+ * from then on: the bind alone is what delivered before.  Returns the
+ * sensor rate before the call, for a rollback (0 = untouched). */
+static uint32_t raise_sensor_fps(uint32_t fps)
+{
+	static int refused;
+	Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
+	uint32_t prev;
+
+	if (!ps || refused || ps->sensor.fps_fallback || ps->sensor.fps == 0 ||
+	    fps <= ps->sensor.fps)
+		return 0;
+	prev = ps->sensor.fps;
+	if (program_sensor_fps(fps) != 0) {
+		refused = 1;
+		fprintf(stderr, "> Sensor refused %u fps; staying at %u, "
+			"bind-only\n", fps, prev);
+		return 0;
+	}
+	return prev;
+}
+
+/* The RTP clock follows the delivered rate: video ticks per frame are 90 kHz
+ * / fps, so a live change must re-derive them or the media clock runs at
+ * startup-rate speed (x1.67 after 60 -> 100).  The encode thread reads the
+ * ticks once per frame. */
+static void set_delivered_fps(uint32_t fps)
+{
+	Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
+
+	g_star6e_control_ctx.delivered_fps = fps;
+	if (ps && fps)
+		__atomic_store_n(&ps->video.rtp_frame_ticks,
+			rtp_session_frame_ticks(fps), __ATOMIC_RELAXED);
+}
+
+/* The rate the sensor runs at, as far as venc knows it: the programmed
+ * rate, or mode_max when unknown or a fallback (fixed-timing modes run at
+ * their own).  The bind can deliver no more. */
+static uint32_t sensor_running_fps(uint32_t mode_max)
+{
+	const Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
+
+	return ps && ps->sensor.fps && !ps->sensor.fps_fallback &&
+		ps->sensor.fps < mode_max ? ps->sensor.fps : mode_max;
+}
+
+/* A failed apply rolls the config back, so the sensor too; the bind is
+ * back at mode_max:mode_max. */
+static void fps_apply_failed(uint32_t raised_from, uint32_t mode_max)
+{
+	if (raised_from)
+		(void)program_sensor_fps(raised_from);
+	set_delivered_fps(sensor_running_fps(mode_max));
+}
+
 static int apply_fps(uint32_t fps)
 {
 	MI_S32 bind_ret;
 	uint32_t sensor_fps;
+	uint32_t raised_from;
 	uint32_t rc_fps;
 
 	if (fps == 0 || fps > PIPELINE_LIVE_FPS_MAX)
@@ -534,6 +630,11 @@ static int apply_fps(uint32_t fps)
 			sensor_fps);
 		fps = sensor_fps;
 	}
+	raised_from = raise_sensor_fps(fps);
+	/* A refused raise stays bind-only: deliver, clock and budget what the
+	 * sensor really runs. */
+	if (fps > sensor_running_fps(sensor_fps))
+		fps = sensor_running_fps(sensor_fps);
 	if (fps == g_star6e_control_ctx.delivered_fps)
 		return 0;
 	/* Decouple delivery from rate control: the VPE->VENC bind DELIVERS the
@@ -554,7 +655,7 @@ static int apply_fps(uint32_t fps)
 		MI_SYS_BindChnPort2(&g_star6e_control_ctx.vpe_port,
 			&g_star6e_control_ctx.venc_port, sensor_fps, sensor_fps,
 			I6_SYS_LINK_FRAMEBASE, 0);
-		g_star6e_control_ctx.delivered_fps = sensor_fps;
+		fps_apply_failed(raised_from, sensor_fps);
 		return -1;
 	}
 
@@ -570,7 +671,7 @@ static int apply_fps(uint32_t fps)
 		MI_SYS_BindChnPort2(&g_star6e_control_ctx.vpe_port,
 			&g_star6e_control_ctx.venc_port, sensor_fps, sensor_fps,
 			I6_SYS_LINK_FRAMEBASE, 0);
-		g_star6e_control_ctx.delivered_fps = sensor_fps;
+		fps_apply_failed(raised_from, sensor_fps);
 		return -1;
 	}
 
@@ -583,7 +684,7 @@ static int apply_fps(uint32_t fps)
 		uint32_t cfg_kbps = g_star6e_control_ctx.vcfg ?
 			g_star6e_control_ctx.vcfg->video0.bitrate : 0;
 
-		g_star6e_control_ctx.delivered_fps = fps;
+		set_delivered_fps(fps);
 		if (cfg_kbps > 0 &&
 		    rc_compensate_kbps(cfg_kbps, old_delivered) !=
 		    rc_compensate_kbps(cfg_kbps, fps))
@@ -597,8 +698,10 @@ static int apply_fps(uint32_t fps)
 	 * off, and the startup idle transition has no consumer at all.  Only
 	 * the live video0.fps write needs it, so it is issued there — see
 	 * apply_fps_live(). */
-	printf("> FPS delivered %u, RC fpsNum %u (bind %u:%u)\n", fps, rc_fps,
-		sensor_fps, fps);
+	/* stderr: Star6E stdout is block-buffered and runs through the audio
+	 * filter pipe, and live-trial logs lost these lines on it. */
+	fprintf(stderr, "> FPS delivered %u, RC fpsNum %u (bind %u:%u)\n", fps,
+		rc_fps, sensor_fps, fps);
 	return 0;
 }
 
@@ -1763,8 +1866,12 @@ static int apply_isp_bin(const char *path)
 		pad_id = g_star6e_control_ctx.pipeline->sensor.pad_id;
 	}
 
+	/* Re-kick the rate the sensor is running at, not the mode max. */
 	return star6e_pipeline_load_isp_bin_live(path, g_star6e_control_ctx.vcfg,
-		sensor_name, pad_id, g_star6e_control_ctx.sensor_fps);
+		sensor_name, pad_id, g_star6e_control_ctx.pipeline &&
+		g_star6e_control_ctx.pipeline->sensor.fps ?
+		g_star6e_control_ctx.pipeline->sensor.fps :
+		g_star6e_control_ctx.sensor_fps);
 }
 
 static char *query_attitude(void)

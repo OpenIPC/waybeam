@@ -1,5 +1,34 @@
 # History
 
+## [0.87.3] - 2026-11-21
+
+Star6E: a live `video0.fps` raise above the rate venc started at now
+actually delivers it.
+
+- **The bug.** At startup the sensor is programmed (`MI_SNR_SetFps`) at
+  `video0.fps`, but the live path took the sensor mode's maximum as its
+  ceiling and only rebound VPE->VENC and the RC fps. A bind can only drop
+  frames, so a venc started at 60 and set live to 100 kept sending 60 while
+  `/api/v1/fps/live` (the RC fps) reported 100. Lowering, and raising back
+  up to the startup rate, always worked.
+- **Now** a raise above the programmed rate re-programs the sensor, capped
+  at the mode's maximum: the exposure cap for the new frame period first,
+  then `MI_SNR_SetFps`, then the orientation re-applied. If the sensor
+  refuses, the delivered and reported rate stay at what it runs. A lower
+  rate still keeps the sensor where it is and decimates.
+- **The RTP clock follows a live fps change.** The video timestamp step
+  was fixed at the startup rate in both directions, so after 60 -> 100 the
+  90 kHz media clock ran 1.67x fast (and 3.3x slow at 30 from a 100 start),
+  misleading jitter buffers, A/V sync and sidecar timing. The step is now
+  re-derived from the delivered rate on every live fps change.
+- The live fps log lines go to stderr: Star6E stdout is block-buffered and
+  runs through the audio filter pipe, and device logs lost some of them.
+- A live ISP-bin reload re-kicks the sensor at its running rate, not the
+  mode maximum, which on a 60 fps start silently moved the sensor to the
+  mode's top rate.
+- Maruko has the same shape (`maruko_apply_fps`) and is a follow-up, to be
+  fixed after a Star6E device run.
+
 ## [0.87.2] - 2026-11-21
 
 With `outgoing.fec` on, venc picks the RTP payload size itself, with

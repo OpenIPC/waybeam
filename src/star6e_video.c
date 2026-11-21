@@ -99,7 +99,8 @@ size_t star6e_video_send_frame(Star6eVideoState *state,
 				state->slice_avg) : state->rtp_payload_size;
 		Star6eRtpFrameContext rtp_frame = {
 			.rtp = &state->rtp_state,
-			.frame_ticks = state->rtp_frame_ticks,
+			.frame_ticks = __atomic_load_n(&state->rtp_frame_ticks,
+				__ATOMIC_RELAXED), /* live fps rewrites it */
 			.params = &state->param_sets,
 			.max_payload = payload,
 			.stats = &frame_packetizer, /* slice sizes, every frame */
