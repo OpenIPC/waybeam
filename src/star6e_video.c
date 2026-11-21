@@ -129,7 +129,9 @@ size_t star6e_video_send_frame(Star6eVideoState *state,
 
 		total_bytes = star6e_output_send_frame(output, stream,
 			state->max_frame_size, send_frame_output_rtp, &rtp_frame);
-		__atomic_store_n(&state->payload_used, payload, __ATOMIC_RELAXED);
+		if (frame_packetizer.rtp_packets) /* not frame-shm, compact, dropped AU */
+			__atomic_store_n(&state->payload_used, payload,
+				__ATOMIC_RELAXED);
 		if (frame_packetizer.slices) {
 			const int32_t mean = (int32_t)(frame_packetizer.slice_bytes /
 				frame_packetizer.slices);
