@@ -2,7 +2,8 @@
 
 ## [0.88.2] - 2026-11-21
 
-`init.d/S95waybeam` (Star6E and Maruko):
+`init.d/S95waybeam` (Star6E and Maruko), and the start fix also in
+`init.d/S95waybeam.cv610`:
 
 - **`start` right after a SIGTERM now starts venc.** The exiting instance still
   shows in `pidof` while it tears down, so `start` said "already running",
