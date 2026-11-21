@@ -3406,8 +3406,11 @@ int maruko_pipeline_start_dual(MarukoBackendContext *ctx,
 			if (maruko_output_init(&d->output, &uri,
 				ctx->cfg.connected_udp,
 				ctx->cfg.allow_unix_encoder_stall) == 0) {
+				/* ch1's own rate: the bind delivers fps, so a
+				 * sensor_fps step ran its clock slow by
+				 * sensor_fps / fps. */
 				maruko_video_init_rtp_state(&d->rtp_state,
-					ctx->cfg.rc_codec, sensor_fps);
+					ctx->cfg.rc_codec, fps);
 				printf("> [maruko][dual] dual-stream chn=%d ->"
 					" %s (%u kbps, %u fps, gop=%u)\n",
 					(int)chn, d->server, bitrate, fps,
