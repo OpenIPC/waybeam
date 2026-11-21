@@ -164,7 +164,8 @@ int maruko_output_apply_server(MarukoOutput *output, const char *uri);
 /* Live outgoing.fec: -1 unless the output is udp:// / unix:// RTP or when
  * the parity arena cannot be allocated. */
 int maruko_output_set_fec(MarukoOutput *output, int on);
-/* Flush the queued packets, keeping the frame's batch open. */
+/* Flush the queued packets, keeping the frame's batch open.  Only while
+ * the batch is active. */
 int maruko_output_flush(MarukoOutput *output);
 
 /** Begin accumulating RTP packets for a frame. When the transport is UDP

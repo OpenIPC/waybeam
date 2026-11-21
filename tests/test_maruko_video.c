@@ -167,6 +167,10 @@ static int mk_fec_check(const MkFecRx *r, int *sources)
 {
 	static uint8_t sym[VENC_FEC_BLOCK_MAX][VENC_FEC_SYM_MAX];
 	static uint8_t want[VENC_FEC_BLOCK_MAX][VENC_FEC_SYM_MAX];
+	const uint16_t seq0 = (uint16_t)(r->d[0][2] << 8 | r->d[0][3]);
+	const uint32_t ssrc = ((uint32_t)r->d[0][8] << 24 |
+		(uint32_t)r->d[0][9] << 16 | (uint32_t)r->d[0][10] << 8 |
+		r->d[0][11]) ^ VENC_FEC_SSRC_XOR;
 	int nsrc = 0, parity = 0;
 
 	while (nsrc < r->n && (r->d[nsrc][1] & 0x7F) != VENC_FEC_PT)
@@ -176,12 +180,18 @@ static int mk_fec_check(const MkFecRx *r, int *sources)
 		const uint8_t *d = r->d[p];
 		const unsigned k = d[14], idx = d[15];
 		const uint16_t base = (uint16_t)(d[16] << 8 | d[17]);
-		const uint16_t seq0 = (uint16_t)(r->d[0][2] << 8 | r->d[0][3]);
 		const unsigned first = (uint16_t)(base - seq0);
 		size_t maxlen = 0;
 
-		if ((d[1] & 0x7F) != VENC_FEC_PT || d[12] != 0x7E || k == 0 ||
-		    idx >= k || first + k > (unsigned)nsrc)
+		/* Header per the spec: PT 100 with M=0, the XORed SSRC, 0x7E,
+		 * version 0 and C=001, E exactly on the frame's last block. */
+		if (d[1] != VENC_FEC_PT || d[12] != 0x7E ||
+		    (d[13] & 0xC7) != 0x01 || k == 0 ||
+		    k > VENC_FEC_BLOCK_MAX || idx >= k ||
+		    first + k > (unsigned)nsrc ||
+		    ((uint32_t)d[8] << 24 | (uint32_t)d[9] << 16 |
+		     (uint32_t)d[10] << 8 | d[11]) != ssrc ||
+		    ((d[13] & 0x20) != 0) != (first + k == (unsigned)nsrc))
 			return -1;
 		memset(sym, 0, sizeof(sym));
 		for (unsigned i = 0; i < k; i++) {

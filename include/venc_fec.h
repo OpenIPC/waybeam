@@ -7,9 +7,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* RS parity after each frame, protocols/venc-fec.md.  Shared by the
- * backends that send it (Star6E, CV610): each one captures the video
- * packets it sends and emits the parity through its own socket path. */
+/* RS parity after each frame, protocols/venc-fec.md.  Shared by every
+ * backend: each one captures the video packets it sends and emits the
+ * parity through its own socket path. */
 #define VENC_FEC_PT 100
 #define VENC_FEC_SSRC_XOR 0x52534643u
 #define VENC_FEC_MAX_SRC 256    /* source packets protected per frame */

@@ -2916,8 +2916,7 @@ static int bind_maruko_pipeline(MarukoBackendContext *ctx)
 		 * the socket came up: the encoder already has its video share,
 		 * and a live server fix must find parity on.  Load validation
 		 * holds fec:true to such a server. */
-		if (ctx->cfg.fec && ctx->cfg.stream_mode == MARUKO_STREAM_RTP &&
-		    venc_fec_set(&ctx->output.fec, 1) != 0)
+		if (ctx->cfg.fec && venc_fec_set(&ctx->output.fec, 1) != 0)
 			return -1;
 	}
 

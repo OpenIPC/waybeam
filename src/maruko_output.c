@@ -470,7 +470,7 @@ void maruko_output_begin_frame(MarukoOutput *output)
 
 int maruko_output_flush(MarukoOutput *output)
 {
-	return output && output->batch.active ? maruko_batch_flush(output) : 0;
+	return maruko_batch_flush(output);
 }
 
 static int maruko_fec_write(const uint8_t *header, size_t header_len,

@@ -2291,12 +2291,6 @@ static int test_outgoing_fec_validation(void)
 		CHECK(c[i].name,
 			(venc_api_validate_loaded_config(&cfg) == NULL) == c[i].ok);
 	}
-	CHECK("fec supported star6e",
-		venc_api_field_supported_for_backend("star6e", "outgoing.fec") == 1);
-	CHECK("fec supported maruko",
-		venc_api_field_supported_for_backend("maruko", "outgoing.fec") == 1);
-	CHECK("fec supported cv610",
-		venc_api_field_supported_for_backend("cv610", "outgoing.fec") == 1);
 	CHECK("fec video share 8000 -> 6400", venc_fec_video_kbps(1, 8000) == 6400);
 	CHECK("fec off keeps the total", venc_fec_video_kbps(0, 8000) == 8000);
 	CHECK("fec payload: nothing learned -> 1400",
@@ -2340,6 +2334,8 @@ static int test_outgoing_fec_live(void)
 	for (size_t i = 0; i < sizeof(backends) / sizeof(backends[0]); i++) {
 		const char *const be = backends[i];
 
+		CHECK("fec live: supported",
+			venc_api_field_supported_for_backend(be, "outgoing.fec") == 1);
 		venc_config_defaults(&cfg);
 		cfg.outgoing.max_payload_size = 1500;
 		memset(&cb, 0, sizeof(cb));
