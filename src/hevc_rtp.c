@@ -79,6 +79,11 @@ size_t hevc_rtp_send_annexb(const uint8_t *data, size_t len,
 	for (;;) {
 		const uint8_t type = h26x_util_hevc_nalu_type(nal, nal_len);
 
+		if (stats && type < 16) {
+			stats->slices++;
+			stats->slice_bytes += (uint32_t)nal_len;
+		}
+
 		if (params) {
 			h26x_param_sets_update(params, PT_H265, type, nal, nal_len);
 			if (type < 32) {

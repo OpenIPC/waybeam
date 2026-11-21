@@ -446,6 +446,20 @@ static int test_hevc_rtp_send_annexb(void)
 	CHECK("annexb: a refused in-band set still gets the prepend",
 		cap.count == 4 && pkt_nal_type(&cap.packets[0]) == 32);
 
+	/* FEC payload sizing counts non-IRAP slices only: an IDR's large
+	 * slices must not inflate the average. */
+	{
+		HevcRtpStats st = {0};
+
+		n = annexb_put(buf, 0, 1, 19, 1, 900);
+		n = annexb_put(buf, n, 1, 1, 0, 300);
+		memset(&cap, 0, sizeof(cap));
+		hevc_rtp_send_annexb(buf, n, NULL, &rtp, capture_write, &cap, 1,
+			1400, &st);
+		CHECK("annexb: slice stats skip IRAP",
+			st.slices == 1 && st.slice_bytes == 300);
+	}
+
 	/* No start code: the region is one raw NAL. */
 	memset(&cap, 0, sizeof(cap));
 	hevc_rtp_send_annexb(raw, sizeof(raw), NULL, &rtp, capture_write, &cap,

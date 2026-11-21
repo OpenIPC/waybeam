@@ -1,5 +1,27 @@
 # History
 
+## [0.87.2] - 2026-11-21
+
+With `outgoing.fec` on, venc picks the RTP payload size itself, with
+`outgoing.maxPayloadSize` as the ceiling (contract 0.34.0, additive).
+
+- **The size** is 3/2 of the mean slice size, smoothed over about 8 frames
+  (IDR slices excluded), never below 1400 and never above `maxPayloadSize`.
+  A typical slice then travels as one datagram, which saves airtime, while a
+  rare large slice is still split, which keeps parity symbols short.
+- **Why:** with one NAL per slice the best size is just above the slice size,
+  and that moves with bitrate, fps and slice count. A replay of the
+  2026-11-21 trial traces at 8000 kbps gives about 1935 B at 100 fps, about
+  3450 B at 60 fps and the ceiling at 30 fps, against measured sweet spots
+  of 1800-2000, about 2800 and the ceiling. Datagrams per frame fall about
+  28 % at 100 fps and 46 % at 60 fps against 1400.
+- **Nothing changes until `maxPayloadSize` is raised:** at the default 1400
+  the derived size is 1400. Set it to the link's datagram limit, at most
+  3780, to let the size grow. With FEC off, `maxPayloadSize` is used as
+  before.
+- `GET /api/v1/transport/status` gains `rtpPayload`, the size of the last
+  frame.
+
 ## [0.87.1] - 2026-11-21
 
 Each H.265 slice gets its own RTP NAL (Star6E and Maruko), so a lost packet

@@ -93,12 +93,16 @@ size_t star6e_video_send_frame(Star6eVideoState *state,
 	state->frame_counter++;
 
 	if (output_enabled) {
+		const uint16_t payload =
+			__atomic_load_n(&output->fec_on, __ATOMIC_RELAXED) ?
+			venc_fec_payload_size(state->rtp_payload_size,
+				state->slice_avg) : state->rtp_payload_size;
 		Star6eRtpFrameContext rtp_frame = {
 			.rtp = &state->rtp_state,
 			.frame_ticks = state->rtp_frame_ticks,
 			.params = &state->param_sets,
-			.max_payload = state->rtp_payload_size,
-			.stats = verbose_enabled ? &frame_packetizer : NULL,
+			.max_payload = payload,
+			.stats = &frame_packetizer, /* slice sizes, every frame */
 		};
 
 		/* Sidecar work — poll, timestamp snapshot, send — is only
@@ -125,6 +129,17 @@ size_t star6e_video_send_frame(Star6eVideoState *state,
 
 		total_bytes = star6e_output_send_frame(output, stream,
 			state->max_frame_size, send_frame_output_rtp, &rtp_frame);
+		__atomic_store_n(&state->payload_used, payload, __ATOMIC_RELAXED);
+		if (frame_packetizer.slices) {
+			const int32_t mean = (int32_t)(frame_packetizer.slice_bytes /
+				frame_packetizer.slices);
+
+			/* EWMA 1/8: follows the scene, not one frame. */
+			state->slice_avg = state->slice_avg ?
+				(uint32_t)((int32_t)state->slice_avg +
+				(mean - (int32_t)state->slice_avg) / 8) :
+				(uint32_t)mean;
+		}
 
 		if (sidecar_active) {
 			RtpSidecarTransportInfo tinfo;

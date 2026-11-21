@@ -2299,6 +2299,14 @@ static int test_outgoing_fec_validation(void)
 		venc_api_field_supported_for_backend("cv610", "outgoing.fec") == 0);
 	CHECK("fec video share 8000 -> 6400", venc_fec_video_kbps(1, 8000) == 6400);
 	CHECK("fec off keeps the total", venc_fec_video_kbps(0, 8000) == 8000);
+	CHECK("fec payload: nothing learned -> 1400",
+		venc_fec_payload_size(3780, 0) == 1400);
+	CHECK("fec payload: 100 fps slices -> 1935",
+		venc_fec_payload_size(3780, 1290) == 1935);
+	CHECK("fec payload: 30 fps slices -> the ceiling",
+		venc_fec_payload_size(3780, 4694) == 3780);
+	CHECK("fec payload: never above a low ceiling",
+		venc_fec_payload_size(1200, 2000) == 1200);
 	return failures;
 }
 

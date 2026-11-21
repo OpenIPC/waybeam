@@ -40,6 +40,23 @@ static inline uint32_t venc_fec_video_kbps(int fec, uint32_t total_kbps)
 		(VENC_FEC_PARITY_DIV + 1)) : total_kbps;
 }
 
+/* With outgoing.fec the RTP payload size is derived, not only capped: 3/2
+ * of the mean non-IRAP slice, so a typical slice is one datagram (every
+ * datagram costs fixed airtime) while a rare large slice is still split
+ * (a block's parity symbol is its longest packet, so a whole large slice
+ * buys fewer parity packets).  maxPayloadSize stays the ceiling the link
+ * carries; the floor is 1400, today's size, or the ceiling if lower. */
+static inline uint16_t venc_fec_payload_size(uint16_t ceiling,
+	uint32_t slice_avg)
+{
+	const uint32_t floor = ceiling < 1400 ? ceiling : 1400;
+	uint32_t p = slice_avg * 3 / 2;
+
+	if (p < floor)
+		p = floor;
+	return (uint16_t)(p > ceiling ? ceiling : p);
+}
+
 /* Practical VENC bitrate bounds (kbps).  The min floor guards against
  * impractically low targets the encoder can't honor — below ~1 Mbit/s the
  * H.26x stream collapses (decoder drops SVC-T, RC oscillates).  Enforced as a

@@ -1712,6 +1712,7 @@ static char *query_transport_status(void)
 			"\"packetsSent\":%u,"
 			"\"fecParityPkts\":%u,"
 			"\"fecUnprotected\":%u,"
+			"\"rtpPayload\":%u,"
 			"\"badAuDrops\":%llu}}",
 			transport,
 			(unsigned)fill_pct,
@@ -1724,6 +1725,8 @@ static char *query_transport_status(void)
 			(unsigned)__atomic_load_n(&ps->output.fec_parity_pkts,
 				__ATOMIC_RELAXED),
 			(unsigned)__atomic_load_n(&ps->output.fec_unprotected,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&ps->video.payload_used,
 				__ATOMIC_RELAXED),
 			(unsigned long long)__atomic_load_n(
 				&ps->output.bad_au_drops, __ATOMIC_RELAXED));

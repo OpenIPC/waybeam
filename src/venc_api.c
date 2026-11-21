@@ -535,7 +535,9 @@ static const FieldUi ui_outgoing_fec = {
 	"Send Reed-Solomon parity after each frame so a receiver with the decoder can "
 	"rebuild lost packets. video0.bitrate stays the total: the encoder gets "
 	"4/5, parity the rest. RTP over udp:// or unix://, maxPayloadSize <= 3780. "
-	"Live: a toggle re-programs the bitrate, which costs one IDR."
+	"Live: a toggle re-programs the bitrate, which costs one IDR. "
+	"While on, the payload size follows the slice size, with "
+	"maxPayloadSize as its ceiling."
 };
 static const FieldUi ui_qr_tap_enabled = {
 	"QR", "Luma tap", "toggle", 0, 0, 0, NULL,
