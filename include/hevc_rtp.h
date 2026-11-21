@@ -33,7 +33,7 @@ size_t hevc_rtp_prepend_param_sets(const H26xParamSets *params, uint8_t nal_type
 
 /** The shared VPS/SPS/PPS rule, for a sender that walks NALs itself:
  *  call _before() ahead of each NAL (it updates params and prepends the
- *  sets once per IRAP picture, before its first slice, unless the encoder
+ *  sets once per IDR picture, before its first slice, unless the encoder
  *  sent all three since the last slice; returns the bytes it sent), and
  *  _sent() after the NAL went out (the encoder's own set counts only
  *  then). */

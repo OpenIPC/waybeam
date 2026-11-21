@@ -64,9 +64,11 @@ size_t hevc_rtp_param_sets_before(H26xParamSets *params, uint8_t type,
 {
 	size_t total_bytes = 0;
 
+	if (!params)
+		return 0;
 	h26x_param_sets_update(params, PT_H265, type, nal, nal_len);
 	if (type < 32) {
-		/* VPS/SPS/PPS once per IRAP picture, before its first slice
+		/* VPS/SPS/PPS once per IDR picture, before its first slice
 		 * (first_slice_segment_in_pic_flag), unless the encoder has
 		 * just sent all three. */
 		if (params->inband != 7 && nal_len > 2 && (nal[2] & 0x80))
@@ -79,7 +81,7 @@ size_t hevc_rtp_param_sets_before(H26xParamSets *params, uint8_t type,
 
 void hevc_rtp_param_sets_sent(H26xParamSets *params, uint8_t type)
 {
-	if (type >= 32 && type <= 34)
+	if (params && type >= 32 && type <= 34)
 		params->inband |= (uint8_t)(1u << (type - 32));
 }
 
