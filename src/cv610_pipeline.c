@@ -80,7 +80,7 @@ typedef struct {
 	unsigned int width;
 	unsigned int height;
 	float        fps;
-	int          lanes;        /* 1..4 */
+	int          sns_mode;     /* ot_isp_pub_attr.sns_mode hint */
 	int          data_rate_x2; /* MIPI_DATA_RATE_X1 or X2 */
 	int          bayer;        /* ot_isp_bayer_format 0..3 */
 	int          raw_bit;      /* 10 or 12 */
@@ -170,7 +170,7 @@ static int mipi_setup(const Cv610PipelineRuntimeConfig *c)
 	sns_clk_source_t clk = 0;
 	sns_rst_source_t rst = 0;
 	lane_divide_mode_t hs = LANE_DIVIDE_MODE_0;
-	int fd, i;
+	int fd, i, lanes = 0;
 
 	memset(&attr, 0, sizeof(attr));
 	attr.devno          = dev;
@@ -184,7 +184,11 @@ static int mipi_setup(const Cv610PipelineRuntimeConfig *c)
 		(c->raw_bit == 10) ? DATA_TYPE_RAW_10BIT : DATA_TYPE_RAW_12BIT;
 	attr.mipi_attr.wdr_mode = OT_MIPI_WDR_MODE_NONE;
 	for (i = 0; i < MIPI_LANE_NUM; i++) {
-		attr.mipi_attr.lane_id[i] = (i < c->lanes) ? (short)i : (short)-1;
+		short id = (i < CV610_SENSOR_LANES_MAX) ? c->sensor->lane_id[i] : -1;
+
+		attr.mipi_attr.lane_id[i] = id;
+		if (id >= 0)
+			lanes++;
 	}
 
 	fd = open(MIPI_DEV_NODE, O_RDWR);
@@ -223,7 +227,7 @@ static int mipi_setup(const Cv610PipelineRuntimeConfig *c)
 
 	close(fd);
 	printf("  ok  mipi: %ux%u raw%d, %d lane(s), data_rate x%d\n",
-		   c->width, c->height, c->raw_bit, c->lanes, c->data_rate_x2 ? 2 : 1);
+		   c->width, c->height, c->raw_bit, lanes, c->data_rate_x2 ? 2 : 1);
 	return 0;
 }
 
@@ -555,7 +559,7 @@ static int isp_setup(const Cv610PipelineRuntimeConfig *c)
 	 * driver comment warns about. */
 	pub.bayer_format    = (ot_isp_bayer_format)c->bayer;
 	pub.wdr_mode        = OT_WDR_MODE_NONE;
-	pub.sns_mode        = 0;
+	pub.sns_mode        = (td_u8)c->sns_mode;
 
 	/* Tell the ISP which registered 3A libs and which sensor this pipe uses;
 	 * without it isp_mem_init cannot resolve the sensor and fails NOT_CFG. */
@@ -805,7 +809,7 @@ int cv610_pipeline_start(const Cv610PipelineConfig *config)
 	c.width = config->width;
 	c.height = config->height;
 	c.fps = (float)config->fps;
-	c.lanes = config->lanes;
+	c.sns_mode = config->sns_mode;
 	c.data_rate_x2 = config->data_rate_x2;
 	c.bayer = config->bayer;
 	c.raw_bit = config->raw_bit;

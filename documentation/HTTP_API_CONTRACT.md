@@ -109,7 +109,7 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.89.2",
+    "app_version": "0.90.0",
     "contract_version": "0.36.1",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
@@ -1797,7 +1797,8 @@ CV610 preserves the same envelope and `selected_pad` / `selected_mode` /
 modes of the sensor `$SENSOR` names (see `docs/CV610_BACKEND.md`, "Sensor
 selection"); each entry has equal `min_fps` and `max_fps`. IMX662 lists four
 (1080p30/60 RAW12, 1080p90/100 RAW10); IMX335 lists five (2592x1944p30
-RAW12, 1296x972p60 binned, 1080p90 crop, 2592x1944p40, 2592x1520p30 crop).
+RAW12, 1296x972p60 binned, 1080p90 crop, 2592x1944p40, 2592x1520p30 crop);
+its two-lane row `imx335_2l` lists two (2592x1944p30 and p45 RAW10).
 
 `selected_pad` / `selected_mode` are what bring-up **actually selected**, not
 what the config asks for — the backend publishes them once the pipeline is

@@ -1,5 +1,41 @@
 # History
 
+## [0.90.0] - 2026-11-22
+
+CV610 drives an IMX335 on a board that routes two CSI-2 lanes.
+
+- **`imx335_2l`, a sensor row for two-lane boards.** Every IMX335 mode the
+  backend knew drives four lanes. On a Hi3516CV613 + IMX335 module wired to
+  MIPI-RX PHY lanes 0 and 2 that is not a degraded picture but none: the
+  receiver counts CRC errors, measures a 0x0 frame, and the encoder emits
+  nothing. The new row is the same part and plugin with the board's wiring
+  and the modes two lanes can carry: 2592x1944 RAW10 at 30 fps (the plugin's
+  mode 6, Sony's two-lane setting) and at 45 fps (mode 7).
+- **A sensor row now carries the lane wiring** (`lane_id[]`, the PHY lane for
+  each data lane) and **a mode can name the plugin mode it needs**
+  (`sns_mode`, passed as `ot_isp_pub_attr.sns_mode`). The existing rows keep
+  lanes 0..3 and `sns_mode` 0, so IMX662 and four-lane IMX335 crafts are
+  unchanged.
+- **Selected with `SENSOR=imx335_2l` in `/etc/waybeam-cv610.conf`.** The
+  u-boot `sensor` name has to stay one sys_config knows (`imx335`), so it
+  cannot reach this row; `S95waybeam` already takes a preset `$SENSOR` ahead
+  of u-boot's.
+- **45 fps is outside the vendor tables.** It runs the sensor's clock tree
+  12.5% fast and is 5.5% under what the SoC's 264 MHz ISP clock passes at
+  5 MP. `video0.fps` up to 30 keeps the vendor mode; only a higher request
+  reaches it. Native 2592x1944 output reaches about 43 fps at that setting;
+  scaled output holds 45.
+- **`documentation/CV610_IMX335_2LANE_FPS_TESTS.md`** records how the limits
+  were found — including that an HMAX below 426 destroys the picture while
+  every MIPI, VI and encoder counter stays clean, so only a snapshot shows it.
+- Needs openhisilicon's `sony_imx335` with modes 6 and 7; an older plugin
+  ignores the hint and programs a four-lane table.
+- Device-run by hand on a stock OpenIPC image's modules: 45.00 fps for
+  3 minutes at 1920x1080 with `isp.keepAspect=false`, no MIPI error, every
+  snapshot clean; 29.97 fps on mode 6; mirror+flip; 22.5 MiB of MMZ. The init
+  script and `load-cv610-online` were **not** exercised on that craft, and no
+  IMX662 or four-lane IMX335 board was available to re-run those rows.
+
 ## [0.89.2] - 2026-11-22
 
 CV610: a failed audio retarget no longer mutes audio until a restart.
@@ -2002,7 +2038,6 @@ field; two per-backend `supported` flags change).
   -4 that IDR is many times a P-frame. At -12 it is no larger than one
   (Star6E 29429 -> 3622 B, Maruko 16575 -> 7739 B) at unchanged delivered
   rate. CV610's default is left alone — `qpDelta` is inert there.
-
 
 ## [0.72.0] - 2026-08-29
 
@@ -5057,7 +5092,6 @@ IPU, results streamed as sidecar metadata and drawn on the debug OSD.
 - New host tests: `tests/test_detect_wire.c` (39 cases) for the trailer
   builder; sidecar send-path call sites updated.
 
-
 ## [0.47.0] - 2026-07-18
 
 Retire the Star6E `aeEngine=custom` userspace AE and remove the `custom` value
@@ -6579,8 +6613,6 @@ and merge per-backend AE selectors into one knob.
   follow the SDK enum and ripping them out is more churn than it's
   worth.
 
-
-
 - **`sensor.unlockEnabled` / `unlockCmd` / `unlockReg` / `unlockValue` /
   `unlockDir` retired from the user surface; unlock now fires
   unconditionally on every cold boot.**  The
@@ -6608,8 +6640,6 @@ and merge per-backend AE selectors into one knob.
   the IMX415/IMX335 register values), and `sensor_unlock_strategy()`
   + `MI_SNR_CustFunction` call sites in `star6e_pipeline.c` and
   `maruko_config.c` stay intact.
-
-
 
 refPred (SVC-T temporal hierarchical reference) lands as a real feature
 behind a single user-facing knob: `video0.resilience`.

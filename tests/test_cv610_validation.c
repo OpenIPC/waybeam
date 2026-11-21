@@ -290,6 +290,60 @@ static int test_sensor_table(void)
 		cv610_mode_select(imx335, -1, 30, 4000, 3000, &idx) ==
 			&imx335->modes[0] && idx == 0);
 
+	/* The two-lane row: the same part and plugin on a board that routes two
+	 * lanes.  Getting it wrong is not a worse picture -- four lanes, or lanes
+	 * 0 and 1, deliver no frame at all on such a board. */
+	{
+		const Cv610Sensor *two = cv610_sensor_find("imx335_2l");
+
+		failures += expect("sns_find_imx335_2l", two != NULL);
+		if (two == NULL)
+			return failures;
+		failures += expect("sns_imx335_2l_same_plugin",
+			two->sns_id == 335 &&
+			strcmp(two->plugin_path, imx335->plugin_path) == 0 &&
+			strcmp(two->obj_symbol, imx335->obj_symbol) == 0);
+		/* PHY lanes 0 and 2, as the measured board routes them. */
+		failures += expect("sns_imx335_2l_lanes",
+			two->lane_id[0] == 0 && two->lane_id[1] == 2 &&
+			two->lane_id[2] == -1 && two->lane_id[3] == -1);
+		/* The plugin never picks its two-lane modes from size and rate, so
+		 * each row has to name one. */
+		failures += expect("sns_imx335_2l_modes", two->mode_count == 2 &&
+			two->modes[0].fps == 30 && two->modes[0].sns_mode == 6 &&
+			two->modes[1].fps == 45 && two->modes[1].sns_mode == 7);
+		for (j = 0; j < two->mode_count; j++)
+			failures += expect("sns_imx335_2l_mode_sane",
+				two->modes[j].width == 2592 &&
+				two->modes[j].height == 1944 &&
+				two->modes[j].raw_bit == 10 &&
+				two->modes[j].sensor_clock_hz == 37125000u);
+		/* 30 fps is Sony's setting and must stay what a 30 fps config gets;
+		 * the 45 fps row runs the sensor past the vendor tables and is
+		 * reached only by asking for more. */
+		failures += expect("sns_imx335_2l_30_is_vendor_mode",
+			cv610_mode_select(two, -1, 30, 0, 0, &idx) == &two->modes[0] &&
+			cv610_mode_select(two, -1, 25, 0, 0, &idx) == &two->modes[0]);
+		failures += expect("sns_imx335_2l_above_30_is_45",
+			cv610_mode_select(two, -1, 40, 0, 0, &idx) == &two->modes[1] &&
+			idx == 1 &&
+			cv610_mode_select(two, -1, 100, 0, 0, &idx) == &two->modes[1]);
+		setenv("SENSOR", "imx335_2l", 1);
+		failures += expect("sns_current_imx335_2l",
+			cv610_sensor_current() == two);
+	}
+	/* Every other row is matched by size and rate, on all four lanes. */
+	for (j = 0; j < imx335->mode_count; j++)
+		failures += expect("sns_imx335_auto_mode",
+			imx335->modes[j].sns_mode == 0);
+	for (j = 0; j < g_imx662->mode_count; j++)
+		failures += expect("sns_imx662_auto_mode",
+			g_imx662->modes[j].sns_mode == 0);
+	for (j = 0; j < CV610_SENSOR_LANES_MAX; j++)
+		failures += expect("sns_four_lane_rows",
+			imx335->lane_id[j] == (int8_t)j &&
+			g_imx662->lane_id[j] == (int8_t)j);
+
 	/* SENSOR picks the row; anything it cannot name is IMX662. */
 	unsetenv("SENSOR");
 	failures += expect("sns_current_unset_is_imx662",
