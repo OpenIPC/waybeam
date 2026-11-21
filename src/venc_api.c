@@ -1558,12 +1558,15 @@ static const char *validate_field_cfg(const VencConfig *cfg, const char *key)
 /* outgoing.fec couples three outgoing keys, so it is checked once on the
  * whole staged config, never per key: `fec=true&maxPayloadSize=1400` must
  * pass in either order.  Parity rides the udp:// / unix:// RTP path and must
- * fit 3800 B; on shm it would cost 1/5 of the encoder rate and send nothing. */
-static const char *validate_fec_cfg(const VencConfig *cfg)
+ * fit 3800 B; on shm it would cost 1/5 of the encoder rate and send nothing.
+ * A backend without parity ignores the key, so a stray fec:true (a config
+ * copied from a Star6E camera) must not block its other outgoing keys. */
+static const char *validate_fec_cfg(const VencConfig *cfg, const char *backend)
 {
 	VencOutputUri uri;
 
-	if (!cfg->outgoing.fec)
+	if (!cfg->outgoing.fec || (backend &&
+	    !venc_api_field_supported_for_backend(backend, "outgoing.fec")))
 		return NULL;
 	if (cfg->outgoing.max_payload_size > VENC_FEC_MAX_PAYLOAD_BYTES)
 		return "outgoing.fec requires outgoing.max_payload_size <= 3780";
@@ -1615,7 +1618,14 @@ const char *venc_api_validate_loaded_config(const VencConfig *cfg)
 		if (err)
 			return err;
 	}
-	err = validate_fec_cfg(cfg);
+	/* g_backend is registered only after load: name the build's own. */
+#if HAVE_BACKEND_MARUKO
+	err = validate_fec_cfg(cfg, "maruko");
+#elif HAVE_BACKEND_CV610
+	err = validate_fec_cfg(cfg, "cv610");
+#else
+	err = validate_fec_cfg(cfg, NULL);
+#endif
 	if (err)
 		return err;
 #if HAVE_BACKEND_CV610
@@ -2603,7 +2613,7 @@ static int stage_params_into_cfg(VencConfig *cfg, const SetQueryParam *params,
 	}
 
 	{
-		const char *err = validate_fec_cfg(cfg);
+		const char *err = validate_fec_cfg(cfg, g_backend);
 
 		if (!err)
 			err = validate_backend_config(g_backend, cfg);

@@ -2359,6 +2359,40 @@ static int test_outgoing_fec_live(void)
 	return failures;
 }
 
+/* A backend without parity ignores outgoing.fec, so a stray fec:true (a
+ * config copied from a Star6E camera) must not block its other outgoing
+ * keys -- and Star6E keeps the rule (the control above). */
+static int test_outgoing_fec_stray_on_other_backends(void)
+{
+	static const char *const backends[] = { "maruko", "cv610" };
+	VencConfig cfg;
+	VencApplyCallbacks cb;
+	int failures = 0, status = 0;
+	char response[1024];
+
+	memset(&cb, 0, sizeof(cb));
+	cb.apply_max_payload_size = test_apply_max_payload;
+	for (size_t i = 0; i < sizeof(backends) / sizeof(backends[0]); i++) {
+		venc_config_defaults(&cfg);
+		cfg.outgoing.fec = true;
+		CHECK("fec stray: other outgoing keys still apply",
+			apply_set_query_http(&cfg, backends[i], &cb,
+				"outgoing.maxPayloadSize=3781", &status, response,
+				sizeof(response)) == 0 && status == 200 &&
+			cfg.outgoing.max_payload_size == 3781);
+		venc_api_clear_reinit();
+	}
+	/* The load path names the build's backend, never the registered one:
+	 * the host build carries no other backend, so the rule still runs. */
+	venc_config_defaults(&cfg);
+	cfg.outgoing.fec = true;
+	snprintf(cfg.outgoing.server, sizeof(cfg.outgoing.server), "%s",
+		"frame-shm://x");
+	CHECK("fec stray: load path still checks on this build",
+		venc_api_validate_loaded_config(&cfg) != NULL);
+	return failures;
+}
+
 static int test_resilience_preset_preserves_intra_refresh_qp(void)
 {
 	int failures = 0;
@@ -2882,6 +2916,7 @@ int test_venc_api(void)
 	failures += test_field_support_by_backend();
 	failures += test_outgoing_fec_validation();
 	failures += test_outgoing_fec_live();
+	failures += test_outgoing_fec_stray_on_other_backends();
 	failures += test_cv610_restart_only_mutability();
 	failures += test_qr_window_live_config_only();
 	failures += test_multi_set_live_success();

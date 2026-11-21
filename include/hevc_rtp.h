@@ -31,6 +31,18 @@ size_t hevc_rtp_prepend_param_sets(const H26xParamSets *params, uint8_t nal_type
 	RtpPacketizerState *rtp, RtpPacketizerWriteFn write_cb, void *opaque,
 	size_t max_payload, HevcRtpStats *stats);
 
+/** The shared VPS/SPS/PPS rule, for a sender that walks NALs itself:
+ *  call _before() ahead of each NAL (it updates params and prepends the
+ *  sets once per IDR picture, before its first slice, unless the encoder
+ *  sent all three since the last slice; returns the bytes it sent), and
+ *  _sent() after the NAL went out (the encoder's own set counts only
+ *  then). */
+size_t hevc_rtp_param_sets_before(H26xParamSets *params, uint8_t type,
+	const uint8_t *nal, size_t nal_len, RtpPacketizerState *rtp,
+	RtpPacketizerWriteFn write_cb, void *opaque, size_t max_payload,
+	HevcRtpStats *stats);
+void hevc_rtp_param_sets_sent(H26xParamSets *params, uint8_t type);
+
 /** Send one encoder pack region as one RTP NAL (single or FU) per Annex-B
  *  NAL: every slice segment travels on its own, so a lost packet costs one
  *  slice instead of the picture.  A region with no start code is one raw
