@@ -663,7 +663,7 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
   Live updates are accepted across all transports (`udp://`, `unix://`, `shm://`):
   the SHM ring slot is sized at startup to fit the validated ceiling so any value
   in range applies live without restart, just like UDP/Unix.
-- `outgoing.fec`: Restart-required boolean, default `false`. Star6E only (advertised
+- `outgoing.fec`: Live boolean, default `false`. Star6E only (advertised
   unsupported on Maruko and CV610). Sends Reed–Solomon parity after each frame's
   packets on the same socket, per `protocols/venc-fec.md` in the coordination repo:
   PT 100, its own SSRC and sequence space, at most 1420 B per datagram, 25 % of the
@@ -671,7 +671,10 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
   with 4/5 of it (at startup and on every live write), parity takes the rest.
   Requires `streamMode=rtp`, a `udp://` or `unix://` server (or none yet), and
   `maxPayloadSize <= 1400`; those combinations are rejected, including a live
-  `maxPayloadSize` above 1400 while it is on.
+  `maxPayloadSize` above 1400 while it is on. The rule is checked on the whole
+  request, so `fec=true&maxPayloadSize=1400` is accepted in either order. A live
+  toggle re-programs the encoder bitrate (one IDR) and parity starts or stops at
+  the next frame boundary; a toggle never splits a frame.
 - `outgoing.connected_udp`: When `true`, calls `connect()` on the UDP socket so the kernel
   returns ICMP port-unreachable errors via `sendmsg()`. Useful for detecting that a receiver
   is down. Default `false` (fire-and-forget).
@@ -1654,8 +1657,8 @@ Field reference:
 | `transportDrops` | Lifetime drops: ring-full for SHM; unsent datagrams after `EAGAIN`/`ENOBUFS` or frame-budget exhaustion for UDP/Unix |
 | `pressureDrops` | Frames dropped by the in-process backpressure path while a sidecar probe was subscribed |
 | `packetsSent` | Lifetime sends accepted: ring writes on `shm://`, datagrams on `udp://`/`unix://`.  Absent on `frame-shm://`, which reports whole frames as `framesSent` instead |
-| `fecParityPkts` | (`udp`/`unix` only) Lifetime RS parity datagrams queued (`outgoing.fec`); included in `packetsSent` |
-| `fecUnprotected` | (`udp`/`unix` only) Lifetime source packets sent with no parity: blocks whose 25 % byte credit bought none (small frames share protection) or packets past the 256-per-frame cap |
+| `fecParityPkts` | (`udp`/`unix` only) Lifetime RS parity datagrams that reached the socket (`outgoing.fec`); included in `packetsSent`. No parity is built for a frame whose video flush already gave up, so a parity drop in `transportDrops` means the socket refused parity after the video went out |
+| `fecUnprotected` | (`udp`/`unix` only) Lifetime source packets sent with no parity: blocks whose 25 % byte credit bought none (small frames share protection) or packets past the 256-per-frame cap (the first 256 stay protected) |
 | `framesSent` | (`frame-shm` only) Lifetime whole frames written into the ring.  The `frame-shm` counterpart of `packetsSent`: this transport carries one access unit per slot, not packets |
 | `oversizeDrops` | (SHM only) Frames rejected for exceeding slot capacity |
 | `slotCount` / `usedSlots` | (SHM only) Ring sizing; `usedSlots` is a snapshot |
@@ -2015,7 +2018,7 @@ in Notes. As of `contract_version: 0.29.0`:
 | `isp.aeEngine` ("sdk" only) | applied | applied | Unified AE selector landed in 0.10.13.  `custom` (userspace AE governor) is RETIRED — Maruko in 0.22.0, Star6E in 0.47.0 — and the value was **removed** in 0.47.0.  `sdk` is the only accepted value; any other (e.g. a stale `custom`) warns and falls back to `sdk`.  Both backends run the SDK firmware/bin AE for convergence plus a supervisory thread that enforces the `isp.gain*`/`isp.shutter*` limits.  CV610 has no such thread and reports `isp.aeEngine` unsupported: its ISP owns AE outright, and the two ceilings it does honour are written straight into `ot_isp_exposure_attr.auto_attr` instead. |
 
 ## Change Log (Contract)
-- `0.33.0` (additive; from venc 0.87.0): new restart-required
+- `0.33.0` (additive; from venc 0.87.0): new live
   `outgoing.fec` (Star6E only) — RS parity after each frame per the
   coordination repo's `protocols/venc-fec.md`; `video0.bitrate` becomes the
   wire total while it is on. `GET /api/v1/transport/status` gains

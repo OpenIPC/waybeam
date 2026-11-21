@@ -280,7 +280,8 @@ static int apply_bitrate(uint32_t kbps)
 	 * value outside what the encoder accepts.  With RS parity on, kbps is
 	 * the wire total and the encoder gets its video share. */
 	kbps = venc_fec_video_kbps(g_star6e_control_ctx.pipeline &&
-		g_star6e_control_ctx.pipeline->output.fec_arena, kbps);
+		__atomic_load_n(&g_star6e_control_ctx.pipeline->output.fec_on,
+			__ATOMIC_RELAXED), kbps);
 	kbps = rc_compensate_kbps(kbps, g_star6e_control_ctx.delivered_fps);
 	if (kbps > VENC_BITRATE_MAX_KBPS)
 		kbps = VENC_BITRATE_MAX_KBPS;
@@ -1528,6 +1529,27 @@ static int apply_max_payload_size(uint16_t size)
 	return 0;
 }
 
+/* video0.bitrate is the wire total, so a toggle re-splits it: one
+ * SetChnAttr, one IDR.  Parity starts or stops at the next frame.  Compares
+ * the APPLIED flag, not vcfg (already committed), so a re-POST is free. */
+static int apply_fec(bool on)
+{
+	Star6ePipelineState *ps = g_star6e_control_ctx.pipeline;
+
+	if (!ps || !g_star6e_control_ctx.vcfg)
+		return -1;
+	if (__atomic_load_n(&ps->output.fec_on, __ATOMIC_RELAXED) == (int)on)
+		return 0;
+	if (star6e_output_set_fec(&ps->output, on) != 0)
+		return -1;
+	if (apply_bitrate(g_star6e_control_ctx.vcfg->video0.bitrate) != 0) {
+		(void)star6e_output_set_fec(&ps->output, !on);
+		return -1;
+	}
+	fprintf(stderr, "> outgoing.fec %s (live)\n", on ? "on" : "off");
+	return 0;
+}
+
 static int apply_mute(bool on)
 {
 	if (!g_star6e_control_ctx.pipeline)
@@ -1877,6 +1899,7 @@ static const VencApplyCallbacks g_star6e_apply_callbacks = {
 	.query_iq_info = star6e_iq_query,
 	.apply_iq_param = star6e_iq_set,
 	.apply_max_payload_size = apply_max_payload_size,
+	.apply_fec = apply_fec,
 	.query_transport_status = query_transport_status,
 	.query_audio_status = query_audio_status,
 	.apply_zoom = apply_zoom,

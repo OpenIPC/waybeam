@@ -5,7 +5,7 @@
 Optional Reed–Solomon parity on the RTP output, for links that air each frame
 once with no retries (waybeam-now blind mode).
 
-- **New `outgoing.fec`** (Star6E, restart, default off). After each frame's
+- **New `outgoing.fec`** (Star6E, live, default off). After each frame's
   packets venc sends RS parity on the same socket, as specified in
   `protocols/venc-fec.md` (coordination repo): PT 100, its own SSRC and
   sequence space, blocks of at most 40 packets, at most 1420 B per datagram.
@@ -17,6 +17,10 @@ once with no retries (waybeam-now blind mode).
   8000 still fits an 8 Mbit/s link. A byte credit keeps parity at 25 % of the
   video, so frames of one to three packets share protection rather than
   overspend.
+- **Live toggle.** Turning it on or off re-programs the encoder bitrate,
+  which costs one IDR, and takes effect at the next frame; the 360 KB parity
+  buffer is allocated on the first enable and kept. The FEC rule is checked
+  on the whole request, so `fec=true&maxPayloadSize=1400` works in one call.
 - Parity uses the Cauchy code of waybeam-link (PROTOCOL.md §14.1), ported to
   C with its NEON multiply; on an SSC338Q a 12+2 block encodes in 54 µs. The
   port matches the spec's byte vectors from waybeam-link's own encoder.

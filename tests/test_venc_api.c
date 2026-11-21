@@ -2301,6 +2301,55 @@ static int test_outgoing_fec_validation(void)
 	return failures;
 }
 
+static int g_fec_calls;
+static bool g_fec_last;
+
+static int test_apply_fec(bool on)
+{
+	g_fec_calls++;
+	g_fec_last = on;
+	return 0;
+}
+
+/* outgoing.fec is live, and its rule runs on the whole staged request, so
+ * the order of keys inside one request does not matter. */
+static int test_outgoing_fec_live(void)
+{
+	VencConfig cfg;
+	VencApplyCallbacks cb;
+	int failures = 0, status = 0;
+	char response[1024];
+
+	venc_config_defaults(&cfg);
+	cfg.outgoing.max_payload_size = 1500;
+	memset(&cb, 0, sizeof(cb));
+	cb.apply_max_payload_size = test_apply_max_payload;
+	cb.apply_fec = test_apply_fec;
+	g_fec_calls = 0;
+
+	CHECK("fec live: fec first, payload second, accepted",
+		apply_set_query_http(&cfg, "star6e", &cb,
+			"outgoing.fec=true&outgoing.maxPayloadSize=1400", &status,
+			response, sizeof(response)) == 0 && status == 200 &&
+		g_fec_calls == 1 && g_fec_last && cfg.outgoing.fec);
+	CHECK("fec live: payload past 1400 with fec on rejected",
+		apply_set_query_http(&cfg, "star6e", &cb,
+			"outgoing.maxPayloadSize=1500", &status, response,
+			sizeof(response)) == 0 && status == 409 &&
+		cfg.outgoing.max_payload_size == 1400);
+	CHECK("fec live: off",
+		apply_set_query_http(&cfg, "star6e", &cb, "outgoing.fec=false",
+			&status, response, sizeof(response)) == 0 &&
+		status == 200 && g_fec_calls == 2 && !g_fec_last &&
+		!cfg.outgoing.fec);
+	cb.apply_fec = NULL;
+	CHECK("fec live: no callback -> 501, unchanged",
+		apply_set_query_http(&cfg, "star6e", &cb, "outgoing.fec=true",
+			&status, response, sizeof(response)) == 0 &&
+		status == 501 && !cfg.outgoing.fec);
+	return failures;
+}
+
 static int test_resilience_preset_preserves_intra_refresh_qp(void)
 {
 	int failures = 0;
@@ -2823,6 +2872,7 @@ int test_venc_api(void)
 	failures += test_register_with_callbacks();
 	failures += test_field_support_by_backend();
 	failures += test_outgoing_fec_validation();
+	failures += test_outgoing_fec_live();
 	failures += test_cv610_restart_only_mutability();
 	failures += test_qr_window_live_config_only();
 	failures += test_multi_set_live_success();

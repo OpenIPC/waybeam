@@ -431,15 +431,10 @@ int star6e_output_init(Star6eOutput *output, const Star6eOutputSetup *setup)
 	output->allow_unix_encoder_stall = setup->allow_unix_encoder_stall;
 	/* RS parity rides the udp:// / unix:// RTP batch only; no server yet
 	 * counts, since a live server change cannot leave those two. */
-	if (setup->fec && star6e_output_is_rtp(output) &&
-	    (setup->uri.type == VENC_OUTPUT_URI_UDP ||
-	     setup->uri.type == VENC_OUTPUT_URI_UNIX)) {
-		output->fec_arena = malloc((size_t)STAR6E_FEC_MAX_SRC *
-			STAR6E_FEC_SYM_MAX);
-		if (!output->fec_arena)
-			return -1;
-		output->fec_rtp.payload_type = STAR6E_FEC_PT;
-	}
+	if (setup->fec && (setup->uri.type == VENC_OUTPUT_URI_UDP ||
+	    setup->uri.type == VENC_OUTPUT_URI_UNIX) &&
+	    star6e_output_set_fec(output, 1) != 0)
+		return -1;
 	if (!setup->has_server)
 		return 0;
 
@@ -489,6 +484,27 @@ int star6e_output_init(Star6eOutput *output, const Star6eOutputSetup *setup)
 	(void)output_socket_capture_capacity(output->socket_handle,
 		&output->send_queue);
 	__atomic_fetch_add(&output->transport_gen, 2, __ATOMIC_RELEASE);
+	return 0;
+}
+
+int star6e_output_set_fec(Star6eOutput *output, int on)
+{
+	if (!output)
+		return -1;
+	if (on && !output->fec_arena) {
+		if (!star6e_output_is_rtp(output) ||
+		    (output->transport != VENC_OUTPUT_URI_UDP &&
+		     output->transport != VENC_OUTPUT_URI_UNIX))
+			return -1;
+		output->fec_arena = malloc((size_t)STAR6E_FEC_MAX_SRC *
+			STAR6E_FEC_SYM_MAX);
+		if (!output->fec_arena)
+			return -1;
+		output->fec_rtp.payload_type = STAR6E_FEC_PT;
+	}
+	/* Release: the encode thread acquires this at begin_frame before it
+	 * touches the arena set up above. */
+	__atomic_store_n(&output->fec_on, on ? 1 : 0, __ATOMIC_RELEASE);
 	return 0;
 }
 
@@ -751,6 +767,8 @@ void star6e_output_begin_frame(Star6eOutput *output)
 	b->count = 0;
 	b->active = 0;
 	output->fec_count = 0;
+	/* Latched per frame so a live toggle never splits one. */
+	output->fec_frame = __atomic_load_n(&output->fec_on, __ATOMIC_ACQUIRE);
 	b->flush_budget_us = STAR6E_OUTPUT_FLUSH_BUDGET_US;
 	b->discard_remaining = 0;
 	b->discard_as_error = 0;
@@ -799,7 +817,9 @@ static int star6e_output_send_parts(Star6eOutput *output,
 /* Keep a sent video packet's payload as a source symbol: 2 B length, then
  * the payload zero-padded to the arena stride.  Called only after a
  * successful send, and the packetizer advances seq only then, so source i
- * is always seq fec_base_seq + i. */
+ * is always seq fec_base_seq + i.  The first packet that cannot be kept
+ * ends capture for the frame (fec_frame = 2): later ones would break the
+ * base + i pairing, and no block may then claim to end the frame. */
 static void star6e_fec_capture(Star6eOutput *output, const uint8_t *header,
 	const uint8_t *payload1, size_t payload1_len,
 	const uint8_t *payload2, size_t payload2_len)
@@ -807,16 +827,17 @@ static void star6e_fec_capture(Star6eOutput *output, const uint8_t *header,
 	const size_t len = payload1_len + payload2_len;
 	uint8_t *sym;
 
+	if (output->fec_frame != 1 || output->fec_count >= STAR6E_FEC_MAX_SRC ||
+	    len > VENC_FEC_MAX_PAYLOAD_BYTES) {
+		output->fec_frame = 2;
+		__atomic_fetch_add(&output->fec_unprotected, 1, __ATOMIC_RELAXED);
+		return;
+	}
 	if (output->fec_count == 0) {
 		output->fec_base_seq = star6e_read_be16(header + 2);
 		output->fec_rtp.timestamp = star6e_read_be32(header + 4);
 		output->fec_rtp.ssrc = star6e_read_be32(header + 8) ^
 			STAR6E_FEC_SSRC_XOR;
-	}
-	if (output->fec_count >= STAR6E_FEC_MAX_SRC ||
-	    len > VENC_FEC_MAX_PAYLOAD_BYTES) {
-		__atomic_fetch_add(&output->fec_unprotected, 1, __ATOMIC_RELAXED);
-		return;
 	}
 	sym = output->fec_arena + (size_t)output->fec_count * STAR6E_FEC_SYM_MAX;
 	star6e_write_be16(sym, (uint16_t)len);
@@ -865,24 +886,25 @@ static void star6e_fec_emit(Star6eOutput *output)
 		output->fec_credit += (int64_t)src_bytes;
 		r = (unsigned)(output->fec_credit /
 			(int64_t)(VENC_FEC_PARITY_DIV * plen));
+		if (r > k) /* more is near-copies; also keeps k + idx <= 255 */
+			r = k;
 		output->fec_credit -= (int64_t)(r * VENC_FEC_PARITY_DIV * plen);
 		if (!r)
 			__atomic_fetch_add(&output->fec_unprotected, k,
 				__ATOMIC_RELAXED);
 
 		par[0] = 0x7E; /* H.265 NAL type 63: decoders ignore it */
-		par[1] = (uint8_t)((b == nb - 1 ? 0x20 : 0) | 0x01);
+		par[1] = (uint8_t)((b == nb - 1 && output->fec_frame == 1 ?
+			0x20 : 0) | 0x01);
 		par[2] = (uint8_t)k;
 		star6e_write_be16(par + 4, (uint16_t)(output->fec_base_seq + first));
 		for (i = 0; i < r; i++) {
 			par[3] = (uint8_t)i;
 			rs_fec_encode(k, i, src, STAR6E_FEC_SYM_MAX, 2 + maxlen,
 				par + STAR6E_FEC_HDR);
-			if (rtp_packetizer_send_packet(&output->fec_rtp,
-			    star6e_fec_write, output, par,
-			    STAR6E_FEC_HDR + 2 + maxlen, NULL, 0, 0) == 0)
-				__atomic_fetch_add(&output->fec_parity_pkts, 1,
-					__ATOMIC_RELAXED);
+			(void)rtp_packetizer_send_packet(&output->fec_rtp,
+				star6e_fec_write, output, par,
+				STAR6E_FEC_HDR + 2 + maxlen, NULL, 0, 0);
 		}
 		first += k;
 	}
@@ -894,11 +916,19 @@ int star6e_output_end_frame(Star6eOutput *output)
 
 	if (!output || !output->batch.active)
 		return 0;
-	/* Video first, so the frame never waits on its parity encode. */
+	/* Video first, so the frame never waits on its parity encode; none if
+	 * that flush gave up (budget or socket full).  fec_count is 0 unless
+	 * fec_frame latched on.  Parity is counted as it reaches the socket. */
 	sent = star6e_batch_flush(output);
-	if (output->fec_arena && output->fec_count) {
+	if (output->fec_count && !output->batch.discard_remaining) {
+		const uint32_t w0 = __atomic_load_n(&output->socket_writes,
+			__ATOMIC_RELAXED);
+
 		star6e_fec_emit(output);
 		sent += star6e_batch_flush(output);
+		__atomic_fetch_add(&output->fec_parity_pkts,
+			__atomic_load_n(&output->socket_writes, __ATOMIC_RELAXED) - w0,
+			__ATOMIC_RELAXED);
 	}
 	output->batch.active = 0;
 	return sent;
@@ -992,7 +1022,7 @@ int star6e_output_send_rtp_parts(Star6eOutput *output,
 	if (star6e_output_send_parts(output, header, header_len,
 	    payload1, payload1_len, payload2, payload2_len) != 0)
 		return -1;
-	if (output->fec_arena)
+	if (output->fec_frame)
 		star6e_fec_capture(output, header, payload1, payload1_len,
 			payload2, payload2_len);
 	return 0;
@@ -1345,6 +1375,8 @@ void star6e_output_teardown(Star6eOutput *output)
 		close(output->socket_handle);
 		output->socket_handle = -1;
 	}
+	output->fec_on = 0;
+	output->fec_frame = 0;
 	free(output->fec_arena);
 	output->fec_arena = NULL;
 

@@ -118,10 +118,13 @@ typedef struct {
 	uint32_t socket_drops;
 	uint32_t socket_writes;
 	Star6eOutputBatch batch;
-	/* RS parity state (NULL arena = off): this frame's source symbols and
-	 * the parity stream's own RTP state.  Producer thread only, except the
+	/* RS parity state: this frame's source symbols and the parity stream's
+	 * own RTP state.  Producer thread only, except fec_on (set by
+	 * star6e_output_set_fec, latched into fec_frame at begin_frame) and the
 	 * two counters (atomic relaxed, read by the API). */
-	uint8_t *fec_arena;
+	int fec_on;
+	int fec_frame;
+	uint8_t *fec_arena; /* allocated on first enable, kept until teardown */
 	uint16_t fec_count;
 	uint16_t fec_base_seq;
 	RtpPacketizerState fec_rtp;
@@ -240,6 +243,11 @@ void star6e_output_reset(Star6eOutput *output);
 int star6e_output_init(Star6eOutput *output, const Star6eOutputSetup *setup);
 
 /** Check if active output uses RTP mode. */
+/* Live outgoing.fec (protocols/venc-fec.md).  The parity arena is
+ * allocated on the first enable and kept until teardown; the encode thread
+ * picks the flag up at the next begin_frame.  -1 when the output is not
+ * udp:// / unix:// RTP or the allocation fails. */
+int star6e_output_set_fec(Star6eOutput *output, int on);
 int star6e_output_is_rtp(const Star6eOutput *output);
 
 /** Check if active output uses shared memory mode. */

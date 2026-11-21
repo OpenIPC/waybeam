@@ -308,6 +308,10 @@ static uint8_t fec_byte(uint16_t seq, size_t j)
 	return (uint8_t)(seq * 37u + j * 11u + 5u);
 }
 
+/* Run once, just before source packet g_fec_hook_at of the next frame. */
+static void (*g_fec_hook)(Star6eOutput *output);
+static unsigned g_fec_hook_at;
+
 /* Send one frame of `k` packets (seq from `base`, payload split 3 B + rest
  * like an FU) and collect every datagram the receiver got. */
 static int fec_send_frame(Star6eOutput *output, int rx, uint16_t base,
@@ -328,6 +332,10 @@ static int fec_send_frame(Star6eOutput *output, int rx, uint16_t base,
 		header[3] = (uint8_t)seq;
 		for (size_t j = 0; j < len; j++)
 			payload[j] = fec_byte(seq, j);
+		if (g_fec_hook && i == g_fec_hook_at) {
+			g_fec_hook(output);
+			g_fec_hook = NULL;
+		}
 		if (star6e_output_send_rtp_parts(output, header, 12, payload, 3,
 		    payload + 3, len - 3) != 0)
 			return -1;
@@ -465,6 +473,74 @@ static int test_star6e_output_fec(void)
 	CHECK("fec counters move",
 		output.fec_parity_pkts > 0 && output.fec_unprotected > 0);
 	star6e_output_teardown(&output);
+	close(rx);
+	return failures;
+}
+
+static size_t fec_len_600(unsigned i) { (void)i; return 600; }
+static void fec_hook_off(Star6eOutput *output) { star6e_output_set_fec(output, 0); }
+static void fec_hook_give_up(Star6eOutput *output)
+{
+	output->batch.discard_remaining = 1; /* as after ENOBUFS / budget */
+}
+
+/* Live outgoing.fec: a toggle takes effect at the next frame and never
+ * splits one; a frame past STAR6E_FEC_MAX_SRC keeps its first 256 protected
+ * with no E; a frame whose video flush gave up gets no parity. */
+static int test_star6e_output_fec_live(void)
+{
+	static uint8_t pkts[400][1500];
+	static ssize_t lens[400];
+	Star6eOutput output;
+	int failures = 0, rx = -1, n;
+	uint32_t unprot, par, drops;
+	uint16_t seq = 100;
+
+	CHECK("fec live: init off", fec_open(&output, 0, &rx) == 0 &&
+		!output.fec_arena);
+	CHECK("fec live: enable", star6e_output_set_fec(&output, 1) == 0 &&
+		output.fec_arena);
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: parity from the next frame",
+		fec_check_parity(pkts, lens, n, 12, seq, fec_len_mixed, NULL) >= 1);
+	seq = (uint16_t)(seq + 12);
+
+	g_fec_hook = fec_hook_off;
+	g_fec_hook_at = 5;
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: off mid-frame still finishes that frame's parity",
+		fec_check_parity(pkts, lens, n, 12, seq, fec_len_mixed, NULL) >= 1);
+	seq = (uint16_t)(seq + 12);
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: then off", n == 12);
+	seq = (uint16_t)(seq + 12);
+
+	CHECK("fec live: re-enable keeps the arena",
+		star6e_output_set_fec(&output, 1) == 0 && output.fec_arena);
+	unprot = output.fec_unprotected;
+	n = fec_send_frame(&output, rx, seq, 300, fec_len_600, pkts, lens, 400);
+	CHECK("fec live: 300 sources, first 256 protected, no E",
+		n > 300 && fec_check_parity(pkts, lens, n, 300, seq, fec_len_600,
+		NULL) >= 7 && output.fec_unprotected - unprot == 300 - 256);
+	seq = (uint16_t)(seq + 300);
+
+	par = output.fec_parity_pkts;
+	drops = output.socket_drops;
+	g_fec_hook = fec_hook_give_up;
+	g_fec_hook_at = 6;
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	/* The give-up also drops the 6 still queued: nothing reaches rx. */
+	CHECK("fec live: no parity after the video flush gave up",
+		n == 0 && output.fec_parity_pkts == par &&
+		output.socket_drops - drops == 12); /* video only */
+	seq = (uint16_t)(seq + 12);
+	n = fec_send_frame(&output, rx, seq, 12, fec_len_mixed, pkts, lens, 400);
+	CHECK("fec live: parity counted as sent",
+		n > 12 && output.fec_parity_pkts - par == (uint32_t)(n - 12));
+
+	star6e_output_teardown(&output);
+	CHECK("fec live: teardown clears the flag",
+		!output.fec_on && !output.fec_arena);
 	close(rx);
 	return failures;
 }
@@ -2330,6 +2406,7 @@ int test_star6e_output(void)
 	failures += test_star6e_output_udp_apply_server();
 	failures += test_star6e_output_udp_send_rtp();
 	failures += test_star6e_output_fec();
+	failures += test_star6e_output_fec_live();
 	failures += test_star6e_output_udp_send_compact();
 	failures += test_star6e_output_unix_send_rtp();
 	failures += test_star6e_output_unix_send_compact();

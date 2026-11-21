@@ -534,7 +534,8 @@ static const FieldUi ui_outgoing_fec = {
 	"Outgoing", "RS parity (FEC)", "toggle", 0, 0, 0, NULL,
 	"Send Reed-Solomon parity after each frame so a waybeam-now ground can "
 	"rebuild lost packets. video0.bitrate stays the total: the encoder gets "
-	"4/5, parity the rest. RTP over udp:// or unix://, maxPayloadSize <= 1400."
+	"4/5, parity the rest. RTP over udp:// or unix://, maxPayloadSize <= 1400. "
+	"Live: a toggle re-programs the bitrate, which costs one IDR."
 };
 static const FieldUi ui_qr_tap_enabled = {
 	"QR", "Luma tap", "toggle", 0, 0, 0, NULL,
@@ -592,7 +593,7 @@ static const FieldDesc g_fields[] = {
 	FIELD(outgoing, server,            FT_STRING, MUT_LIVE),
 	FIELD(outgoing, stream_mode,       FT_STRING, MUT_RESTART),
 	FIELD(outgoing, max_payload_size,  FT_UINT16, MUT_LIVE),
-	FIELD_UI(outgoing, fec,            FT_BOOL,   MUT_RESTART, &ui_outgoing_fec),
+	FIELD_UI(outgoing, fec,            FT_BOOL,   MUT_LIVE,    &ui_outgoing_fec),
 	FIELD(outgoing, connected_udp,     FT_BOOL,   MUT_RESTART),
 	FIELD(outgoing, allow_unix_encoder_stall, FT_BOOL, MUT_RESTART),
 	FIELD(outgoing, audio_port,        FT_INT,    MUT_RESTART),
@@ -1524,21 +1525,6 @@ static const char *validate_field_cfg(const VencConfig *cfg, const char *key)
 		    v > VENC_OUTPUT_PAYLOAD_CEILING_BYTES)
 			return "outgoing.max_payload_size must be in range [576, 4000]";
 	}
-	if (cfg->outgoing.fec && strncmp(key, "outgoing.", 9) == 0) {
-		/* Parity rides the udp:// / unix:// RTP path and must fit 1420 B;
-		 * on shm it would cost 1/5 of the encoder rate and send nothing. */
-		VencOutputUri uri;
-
-		if (cfg->outgoing.max_payload_size > VENC_FEC_MAX_PAYLOAD_BYTES)
-			return "outgoing.fec requires outgoing.max_payload_size <= 1400";
-		if (strcmp(cfg->outgoing.stream_mode, "rtp") != 0)
-			return "outgoing.fec requires outgoing.stream_mode=rtp";
-		if (cfg->outgoing.server[0] &&
-		    (venc_config_parse_output_uri(cfg->outgoing.server, &uri) != 0 ||
-		     (uri.type != VENC_OUTPUT_URI_UDP &&
-		      uri.type != VENC_OUTPUT_URI_UNIX)))
-			return "outgoing.fec requires a udp:// or unix:// server";
-	}
 	if (strcmp(key, "detect.net_width") == 0 ||
 	    strcmp(key, "detect.net_height") == 0) {
 		/* Tap/model dims must be a multiple of 32 (>=64) — the YOLO head
@@ -1567,6 +1553,28 @@ static const char *validate_field_cfg(const VencConfig *cfg, const char *key)
 	return NULL;
 }
 
+/* outgoing.fec couples three outgoing keys, so it is checked once on the
+ * whole staged config, never per key: `fec=true&maxPayloadSize=1400` must
+ * pass in either order.  Parity rides the udp:// / unix:// RTP path and must
+ * fit 1420 B; on shm it would cost 1/5 of the encoder rate and send nothing. */
+static const char *validate_fec_cfg(const VencConfig *cfg)
+{
+	VencOutputUri uri;
+
+	if (!cfg->outgoing.fec)
+		return NULL;
+	if (cfg->outgoing.max_payload_size > VENC_FEC_MAX_PAYLOAD_BYTES)
+		return "outgoing.fec requires outgoing.max_payload_size <= 1400";
+	if (strcmp(cfg->outgoing.stream_mode, "rtp") != 0)
+		return "outgoing.fec requires outgoing.stream_mode=rtp";
+	if (cfg->outgoing.server[0] &&
+	    (venc_config_parse_output_uri(cfg->outgoing.server, &uri) != 0 ||
+	     (uri.type != VENC_OUTPUT_URI_UDP &&
+	      uri.type != VENC_OUTPUT_URI_UNIX)))
+		return "outgoing.fec requires a udp:// or unix:// server";
+	return NULL;
+}
+
 const char *venc_api_validate_loaded_config(const VencConfig *cfg)
 {
 	/* Keys with rules in validate_field_cfg().  Backend-coupled checks
@@ -1592,19 +1600,22 @@ const char *venc_api_validate_loaded_config(const VencConfig *cfg)
 		"fpv.roi_steps",
 		"fpv.roi_center",
 		"outgoing.max_payload_size",
-		"outgoing.fec",
 		"snapshot.quality",
 	};
+	const char *err;
 	size_t i;
 
 	if (!cfg)
 		return "invalid config state";
 
 	for (i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
-		const char *err = validate_field_cfg(cfg, keys[i]);
+		err = validate_field_cfg(cfg, keys[i]);
 		if (err)
 			return err;
 	}
+	err = validate_fec_cfg(cfg);
+	if (err)
+		return err;
 #if HAVE_BACKEND_CV610
 	/* CV610's rules run AFTER the shared sweep, not instead of it.  This
 	 * branch used to return cv610_validate_config() directly, so CV610 was
@@ -1756,6 +1767,7 @@ typedef enum {
 	LIVE_GROUP_OUTGOING,
 	LIVE_GROUP_MAX_PAYLOAD,
 	LIVE_GROUP_MUTE,
+	LIVE_GROUP_FEC,
 	LIVE_GROUP_ZOOM,
 	LIVE_GROUP_ISP_BIN,
 	LIVE_GROUP_SNAPSHOT_QUALITY,
@@ -1937,6 +1949,8 @@ static LiveApplyGroup live_group_for_key(const char *canonical_key)
 		return LIVE_GROUP_MAX_PAYLOAD;
 	if (strcmp(canonical_key, "audio.mute") == 0)
 		return LIVE_GROUP_MUTE;
+	if (strcmp(canonical_key, "outgoing.fec") == 0)
+		return LIVE_GROUP_FEC;
 	if (strcmp(canonical_key, "video0.zoom_x") == 0 ||
 	    strcmp(canonical_key, "video0.zoom_y") == 0)
 		return LIVE_GROUP_ZOOM;
@@ -1990,6 +2004,8 @@ static const char *live_group_name(LiveApplyGroup group)
 		return "outgoing.max_payload_size";
 	case LIVE_GROUP_MUTE:
 		return "audio.mute";
+	case LIVE_GROUP_FEC:
+		return "outgoing.fec";
 	case LIVE_GROUP_ZOOM:
 		return "video0.zoom_*";
 	case LIVE_GROUP_ISP_BIN:
@@ -2170,6 +2186,8 @@ static int live_group_supported_for_cfg(const VencConfig *cfg,
 		return g_cb->apply_max_payload_size != NULL;
 	case LIVE_GROUP_MUTE:
 		return g_cb->apply_mute != NULL;
+	case LIVE_GROUP_FEC:
+		return g_cb->apply_fec != NULL;
 	case LIVE_GROUP_ZOOM:
 		return g_cb->apply_zoom != NULL;
 	case LIVE_GROUP_ISP_BIN:
@@ -2253,6 +2271,9 @@ static void copy_live_group_fields(VencConfig *dst, const VencConfig *src,
 		break;
 	case LIVE_GROUP_MUTE:
 		dst->audio.mute = src->audio.mute;
+		break;
+	case LIVE_GROUP_FEC:
+		dst->outgoing.fec = src->outgoing.fec;
 		break;
 	case LIVE_GROUP_ZOOM:
 		dst->video0.zoom_pct = src->video0.zoom_pct;
@@ -2415,6 +2436,8 @@ static int apply_live_group_for_cfg(const VencConfig *cfg,
 		return g_cb->apply_max_payload_size(cfg->outgoing.max_payload_size);
 	case LIVE_GROUP_MUTE:
 		return g_cb->apply_mute(cfg->audio.mute);
+	case LIVE_GROUP_FEC:
+		return g_cb->apply_fec(cfg->outgoing.fec);
 	case LIVE_GROUP_ZOOM:
 		return g_cb->apply_zoom(cfg->video0.zoom_pct,
 			cfg->video0.zoom_x, cfg->video0.zoom_y);
@@ -2578,7 +2601,10 @@ static int stage_params_into_cfg(VencConfig *cfg, const SetQueryParam *params,
 	}
 
 	{
-		const char *err = validate_backend_config(g_backend, cfg);
+		const char *err = validate_fec_cfg(cfg);
+
+		if (!err)
+			err = validate_backend_config(g_backend, cfg);
 		if (err) {
 			*status_code = 409;
 			return make_error_json("validation_failed", err,
