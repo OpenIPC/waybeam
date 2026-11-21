@@ -13,6 +13,8 @@ typedef struct {
 	uint32_t fu_packets;
 	uint32_t rtp_packets;
 	uint32_t rtp_payload_bytes;
+	uint32_t slices;       /* non-IRAP slice NALs, for FEC payload sizing */
+	uint32_t slice_bytes;
 } HevcRtpStats;
 
 /** Send one HEVC NAL: single-NAL packet when it fits, else FU-A fragments.

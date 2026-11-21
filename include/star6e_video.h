@@ -16,6 +16,8 @@
 typedef struct {
 	RtpPacketizerState rtp_state;
 	uint32_t rtp_frame_ticks;
+	uint32_t slice_avg;     /* smoothed mean non-IRAP slice, bytes */
+	uint16_t payload_used;  /* RTP payload size of the last frame */
 	H26xParamSets param_sets;
 	uint32_t sensor_framerate;
 	uint16_t max_frame_size;

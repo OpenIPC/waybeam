@@ -163,6 +163,87 @@ static int test_star6e_video_send_frame_rtp(void)
 	return failures;
 }
 
+/* Media datagrams (PT 97) of one frame, parity skipped. */
+static int fec_media_count(int sock, int *max_len)
+{
+	uint8_t buf[4096];
+	int n = 0;
+	ssize_t r;
+
+	*max_len = 0;
+	while ((r = recv(sock, buf, sizeof(buf), MSG_DONTWAIT)) > 0) {
+		if ((buf[1] & 0x7F) != 97)
+			continue;
+		n++;
+		if (r > *max_len)
+			*max_len = (int)r;
+	}
+	return n;
+}
+
+/* With outgoing.fec the payload size is 3/2 of the smoothed slice size,
+ * capped by maxPayloadSize; without it the cap itself is used. */
+static int test_star6e_video_fec_payload_derived(void)
+{
+	static uint8_t au[2 * (3 + 2400)];
+	VencConfig cfg;
+	Star6eOutputSetup setup;
+	Star6eOutput output;
+	Star6eVideoState state = {0};
+	MI_VENC_Pack_t pack = {0};
+	MI_VENC_Stream_t stream = {0};
+	char uri[64];
+	uint16_t port;
+	int sock, n, max_len, failures = 0;
+
+	for (int s = 0; s < 2; s++) {
+		uint8_t *p = au + s * (3 + 2400);
+
+		p[0] = 0; p[1] = 0; p[2] = 1;
+		p[3] = 0x02; p[4] = 0x01; /* TRAIL_R */
+		memset(p + 5, 0x5A, 2400 - 2);
+		p[5] = s == 0 ? 0x80 : 0x00;
+	}
+	pack.data = au;
+	pack.length = sizeof(au);
+	pack.packNum = 1;
+	pack.packetInfo[0].length = sizeof(au);
+	stream.count = 1;
+	stream.packet = &pack;
+
+	venc_config_defaults(&cfg);
+	cfg.outgoing.max_payload_size = 3780;
+	sock = create_udp_receiver(&port);
+	snprintf(uri, sizeof(uri), "udp://127.0.0.1:%u", port);
+	CHECK("fec payload: output up",
+		sock >= 0 && star6e_output_prepare(&setup, uri, "rtp", 0) == 0 &&
+		star6e_output_init(&output, &setup) == 0 &&
+		star6e_output_set_fec(&output, 1) == 0);
+	star6e_video_init(&state, &cfg, 60, &output);
+
+	(void)star6e_video_send_frame(&state, &output, &stream, 1, 0, NULL,
+		NULL, NULL, 0);
+	n = fec_media_count(sock, &max_len);
+	CHECK("fec payload: nothing learned yet -> 1400, 2 fragments a slice",
+		state.payload_used == 1400 && n == 4 && max_len <= 12 + 1400 &&
+		state.slice_avg == 2400);
+	(void)star6e_video_send_frame(&state, &output, &stream, 1, 0, NULL,
+		NULL, NULL, 0);
+	n = fec_media_count(sock, &max_len);
+	CHECK("fec payload: 3/2 x 2400 = 3600, one datagram a slice",
+		state.payload_used == 3600 && n == 2 &&
+		max_len == 12 + 2400);
+	(void)star6e_output_set_fec(&output, 0);
+	(void)star6e_video_send_frame(&state, &output, &stream, 1, 0, NULL,
+		NULL, NULL, 0);
+	(void)fec_media_count(sock, &max_len);
+	CHECK("fec payload: fec off uses the ceiling", state.payload_used == 3780);
+
+	star6e_output_teardown(&output);
+	close(sock);
+	return failures;
+}
+
 static int test_star6e_video_send_frame_disabled(void)
 {
 	static const uint8_t nal[] = { 0x02, 0x01, 0xAA, 0xBB };
@@ -465,6 +546,7 @@ int test_star6e_video(void)
 	failures += test_star6e_video_init_compact_state();
 	failures += test_star6e_video_send_frame_rtp();
 	failures += test_star6e_video_send_frame_disabled();
+	failures += test_star6e_video_fec_payload_derived();
 	failures += test_star6e_video_sidecar_ext();
 	failures += test_star6e_video_sidecar_transport_layouts();
 	return failures;
