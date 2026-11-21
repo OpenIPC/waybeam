@@ -4705,8 +4705,9 @@ static int maruko_pipeline_process_stream(MarukoBackendContext *ctx,
 			ctx->sensor.pad_id, ctx->sensor.fps, rt->frame_counter);
 	}
 
-	/* Orientation (image.flip / image.mirror) is applied once at bring-up
-	 * (sensor_select + maruko_start_vpe) and holds — no per-frame re-apply
+	/* Orientation (image.flip / image.mirror) is applied at bring-up
+	 * (sensor_select + maruko_start_vpe) and after every SetFps
+	 * (maruko_pipeline_set_sensor_fps) and holds — no per-frame re-apply
 	 * needed (IMX415 device-verified zero drift).  See star6e_runtime.c. */
 
 	/* Debug OSD overlay — Star6E parity (star6e_runtime.c:825-849). */

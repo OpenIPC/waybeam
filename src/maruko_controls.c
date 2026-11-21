@@ -163,6 +163,7 @@ typedef struct {
 	 * rather than as a file-scope global, matching
 	 * Star6eControlContext::applied_server. */
 	char applied_server[VENC_CONFIG_STRING_MAX];
+	int fps_raise_refused; /* SetFps refused once: bind-only after */
 } MarukoControlContext;
 
 enum {
@@ -439,26 +440,33 @@ static int program_sensor_fps(uint32_t fps)
 	fprintf(stderr, "> [maruko] Sensor fps %u -> %u, max shutter %uus%s\n",
 		prev, fps, 1000000 / (fps * (rule_180 ? 2 : 1)),
 		rule_180 ? " (180-degree rule, pinned)" : "");
+	/* An explicit ceiling wins in the AE thread, as it does at startup. */
+	if (!rule_180 && g_ctx.vcfg &&
+	    g_ctx.vcfg->isp.shutter_max_us > 1000000 / fps)
+		fprintf(stderr, "> [maruko] isp.shutterMaxUs %u is longer than "
+			"the %u fps period: a dark scene can hold the sensor "
+			"below it\n", g_ctx.vcfg->isp.shutter_max_us, fps);
 	return 0;
 }
 
 /* Raise the sensor for a live fps above its programmed rate.  Never on a
  * startup fallback rate (fixed-timing modes refuse SetFps), never while the
- * dual stream is up (ch1 is bound off ch0 at sensor:fps), and after one
- * refusal bind-only from then on, which is what delivered before.  Returns
- * the rate before the call, for a rollback (0 = untouched). */
+ * dual stream is up (ch1 is bound off ch0 at sensor:fps) or stab framing
+ * runs (its per-frame detector is sized for the start rate), and after one
+ * refusal bind-only, which is what delivered before.  Returns the rate
+ * before the call, for a rollback (0 = untouched). */
 static uint32_t raise_sensor_fps(uint32_t fps)
 {
-	static int refused;
 	MarukoBackendContext *b = g_ctx.backend;
 	uint32_t prev;
 
-	if (!b || refused || b->dual || b->sensor.fps_fallback ||
-	    b->sensor.fps == 0 || fps <= b->sensor.fps)
+	if (!b || g_ctx.fps_raise_refused || b->dual ||
+	    (g_ctx.vcfg && strcmp(g_ctx.vcfg->video0.framing, "stab") == 0) ||
+	    b->sensor.fps_fallback || b->sensor.fps == 0 || fps <= b->sensor.fps)
 		return 0;
 	prev = b->sensor.fps;
 	if (program_sensor_fps(fps) != 0) {
-		refused = 1;
+		g_ctx.fps_raise_refused = 1;
 		fprintf(stderr, "> [maruko] Sensor refused %u fps; staying at "
 			"%u, bind-only\n", fps, prev);
 		return 0;
@@ -521,7 +529,9 @@ static int maruko_apply_fps(uint32_t fps)
 	if (maruko_framing_fill_graph_ready()) {
 		if (maruko_framing_stab_fill_set_fps(sensor_fps, fps) != 0) {
 			printf("> FPS %u: fill FRC update failed\n", fps);
-			fps_apply_failed(raised_from);
+			/* The FRC keeps its ratio, so the step stays. */
+			if (raised_from)
+				(void)program_sensor_fps(raised_from);
 			return -1;
 		}
 	} else
