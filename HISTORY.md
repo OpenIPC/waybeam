@@ -1,5 +1,28 @@
 # History
 
+## [0.87.1] - 2026-11-21
+
+Each H.265 slice gets its own RTP NAL (Star6E and Maruko), so a lost packet
+costs one slice instead of the whole picture.
+
+- **The bug.** With `sliceCount` > 1 the SDK returns all of a picture's slices
+  in one pack, and the RTP path sent that pack as one NAL with the other
+  slices' start codes inside it. One lost fragment made the depayloader drop
+  the whole NAL, and so every slice: measured on a 6-slice stream, a lost
+  packet cost 6.0 slices on average.
+- **Now** the pack is split on its start codes (`hevc_rtp_send_annexb`, shared
+  by both backends; CV610 already split). Adjacent slices still share one NAL
+  -- start code inside, exactly as before -- when that saves a packet,
+  because every datagram costs airtime regardless of size. Replayed over
+  60 s of real 30/60/100 fps traces: packets per frame +2.7 / +2.9 / +10.5 %
+  (one NAL per slice would be +9 / +20 / +39 %), and a lost packet costs
+  1.5 / 1.9 / 1.7 slices.
+- Each NAL's type is read from its own header (the SDK's pack type describes
+  only the first NAL of a pack), and VPS/SPS/PPS are prepended once per IRAP
+  picture, before its first slice, never once per slice.
+- No API change. With `outgoing.fec` the per-frame blocks simply hold the
+  slightly larger packet count; the parity ratio is unchanged.
+
 ## [0.87.0] - 2026-11-21
 
 Optional Reed–Solomon parity on the RTP output, for links that air each frame

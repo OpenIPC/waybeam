@@ -37,9 +37,6 @@ size_t star6e_hevc_rtp_send_frame(const MI_VENC_Stream_t *stream,
 		for (unsigned int k = 0; k < nal_count; ++k) {
 			const uint8_t *data = NULL;
 			size_t length = 0;
-			const uint8_t *nal_ptr;
-			size_t nal_len;
-			uint8_t nal_type;
 			int last_nal;
 
 			if (pack->packNum > 0) {
@@ -62,32 +59,11 @@ size_t star6e_hevc_rtp_send_frame(const MI_VENC_Stream_t *stream,
 			if (!data || length == 0)
 				continue;
 
-			nal_ptr = data;
-			nal_len = length;
-			h26x_util_strip_start_code(&nal_ptr, &nal_len);
-			if (nal_len == 0)
-				continue;
-
-			nal_type = h26x_util_hevc_nalu_type(nal_ptr, nal_len);
-			if (pack->packNum > 0)
-				nal_type = (uint8_t)pack->packetInfo[k].packType.h265Nalu;
-
-			if (params)
-				h26x_param_sets_update(params, PT_H265, nal_type, nal_ptr, nal_len);
-
 			last_nal = (i == stream->count - 1) &&
 				((pack->packNum > 0 && k == nal_count - 1) ||
 				 (pack->packNum == 0));
-
-			if (params) {
-				total_bytes += hevc_rtp_prepend_param_sets(params,
-					nal_type, rtp,
-					star6e_hevc_rtp_write, output, max_payload,
-					stats);
-			}
-
-			total_bytes += hevc_rtp_send_nal(nal_ptr, nal_len, rtp,
-				star6e_hevc_rtp_write, output, last_nal, max_payload,
+			total_bytes += hevc_rtp_send_annexb(data, length, params,
+				rtp, star6e_hevc_rtp_write, output, last_nal, max_payload,
 				stats);
 		}
 	}

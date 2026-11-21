@@ -325,6 +325,104 @@ static int test_hevc_rtp_single_marker_on_last(void)
 	return failures;
 }
 
+/* Append start code + a NAL of `len` bytes (type, first_slice flag) to buf. */
+static size_t annexb_put(uint8_t *buf, size_t at, int long_code, uint8_t type,
+	int first_slice, size_t len)
+{
+	static const uint8_t code[] = { 0, 0, 0, 1 };
+
+	memcpy(buf + at, long_code ? code : code + 1, long_code ? 4 : 3);
+	at += long_code ? 4 : 3;
+	buf[at] = (uint8_t)(type << 1);
+	buf[at + 1] = 0x01;
+	memset(buf + at + 2, 0x5A, len - 2);
+	if (type < 32)
+		buf[at + 2] = first_slice ? 0x80 : 0x00;
+	return at + len;
+}
+
+/* hevc_rtp_send_annexb: slices split on start codes, joined only when that
+ * saves a packet; VPS/SPS/PPS once per IRAP picture; marker on the end. */
+static int test_hevc_rtp_send_annexb(void)
+{
+	static uint8_t buf[4096];
+	static const uint8_t vps[] = { 0x40, 0x01, 0xAA };
+	static const uint8_t sps[] = { 0x42, 0x01, 0xBB };
+	static const uint8_t pps[] = { 0x44, 0x01, 0xCC };
+	static const uint8_t raw[] = { 0x02, 0x01, 0x80, 0x11, 0x22 };
+	H26xParamSets params = {0};
+	static CaptureCtx cap;
+	RtpPacketizerState rtp = { .seq = 0x500, .timestamp = 0x5000,
+		.ssrc = 0xFEED, .payload_type = 97 };
+	int failures = 0;
+	size_t n;
+
+	/* Two 1000 B slices: joining saves nothing, so two NALs; the 4-byte
+	 * start code's leading zero does not stick to the first slice. */
+	n = annexb_put(buf, 0, 1, 1, 1, 1000);
+	n = annexb_put(buf, n, 1, 1, 0, 1000);
+	memset(&cap, 0, sizeof(cap));
+	hevc_rtp_send_annexb(buf, n, NULL, &rtp, capture_write, &cap, 1, 1400,
+		NULL);
+	CHECK("annexb: two slices, two NALs",
+		cap.count == 2 && cap.packets[0].payload_len == 1000 &&
+		cap.packets[1].payload_len == 1000 &&
+		memcmp(cap.packets[1].payload, buf + 1008, 1000) == 0);
+	CHECK("annexb: marker on the last packet only",
+		!rtp_marker_set(cap.packets[0].header) &&
+		rtp_marker_set(cap.packets[1].header));
+
+	/* 1500 + 100: apart 2 + 1 packets, joined (start code inside) 2. */
+	n = annexb_put(buf, 0, 0, 1, 1, 1500);
+	n = annexb_put(buf, n, 0, 1, 0, 100);
+	memset(&cap, 0, sizeof(cap));
+	hevc_rtp_send_annexb(buf, n, NULL, &rtp, capture_write, &cap, 1, 1400,
+		NULL);
+	CHECK("annexb: small tail joins when it saves a packet",
+		cap.count == 2 && pkt_nal_type(&cap.packets[0]) == 49 &&
+		pkt_nal_type(&cap.packets[1]) == 49 &&
+		cap.packets[0].payload_len + cap.packets[1].payload_len ==
+		1500 + 3 + 100 - 2 + 2 * 3);
+
+	/* Parameter sets are never joined to each other or to a slice. */
+	n = annexb_put(buf, 0, 1, 32, 0, 24);
+	n = annexb_put(buf, n, 1, 33, 0, 40);
+	n = annexb_put(buf, n, 1, 34, 0, 8);
+	n = annexb_put(buf, n, 1, 19, 1, 60);
+	memset(&cap, 0, sizeof(cap));
+	hevc_rtp_send_annexb(buf, n, &params, &rtp, capture_write, &cap, 1,
+		1400, NULL);
+	CHECK("annexb: VPS SPS PPS learned and kept separate",
+		params.vps_len == 24 && params.pps_len == 8 && cap.count >= 4 &&
+		pkt_nal_type(&cap.packets[0]) == 32 &&
+		pkt_nal_type(&cap.packets[1]) == 33 &&
+		pkt_nal_type(&cap.packets[2]) == 34);
+
+	/* An IRAP picture in two slices: the prepend goes before the first
+	 * slice only, not once per slice. */
+	h26x_param_sets_update(&params, PT_H265, 32, vps, sizeof(vps));
+	h26x_param_sets_update(&params, PT_H265, 33, sps, sizeof(sps));
+	h26x_param_sets_update(&params, PT_H265, 34, pps, sizeof(pps));
+	n = annexb_put(buf, 0, 1, 19, 1, 1000);
+	n = annexb_put(buf, n, 1, 19, 0, 1000);
+	memset(&cap, 0, sizeof(cap));
+	hevc_rtp_send_annexb(buf, n, &params, &rtp, capture_write, &cap, 1,
+		1400, NULL);
+	CHECK("annexb: one VPS/SPS/PPS prepend per IRAP picture",
+		cap.count == 5 && pkt_nal_type(&cap.packets[0]) == 32 &&
+		pkt_nal_type(&cap.packets[3]) == 19 &&
+		pkt_nal_type(&cap.packets[4]) == 19);
+
+	/* No start code: the region is one raw NAL. */
+	memset(&cap, 0, sizeof(cap));
+	hevc_rtp_send_annexb(raw, sizeof(raw), NULL, &rtp, capture_write, &cap,
+		1, 1400, NULL);
+	CHECK("annexb: raw NAL sent whole",
+		cap.count == 1 && cap.packets[0].payload_len == sizeof(raw) &&
+		memcmp(cap.packets[0].payload, raw, sizeof(raw)) == 0);
+	return failures;
+}
+
 int test_hevc_rtp(void)
 {
 	int failures = 0;
@@ -336,5 +434,6 @@ int test_hevc_rtp(void)
 	failures += test_hevc_rtp_trail_n_type_preserved();
 	failures += test_hevc_rtp_null_stats();
 	failures += test_hevc_rtp_single_marker_on_last();
+	failures += test_hevc_rtp_send_annexb();
 	return failures;
 }
