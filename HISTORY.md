@@ -1,5 +1,30 @@
 # History
 
+## [0.87.0] - 2026-11-21
+
+Optional Reed–Solomon parity on the RTP output, for links that air each frame
+once with no retries (waybeam-now blind mode).
+
+- **New `outgoing.fec`** (Star6E, restart, default off). After each frame's
+  packets venc sends RS parity on the same socket, as specified in
+  `protocols/venc-fec.md` (coordination repo): PT 100, its own SSRC and
+  sequence space, blocks of at most 40 packets, at most 1420 B per datagram.
+  A receiver with the decoder rebuilds lost packets byte for byte; one without
+  it drops PT 100, and the 6-byte header doubles as an H.265 NAL of type 63,
+  which a decoder ignores if a depayloader passes it through.
+- **`video0.bitrate` stays the total.** With FEC on the encoder is given 4/5
+  of it, at startup and on every live write, and parity takes the rest, so
+  8000 still fits an 8 Mbit/s link. A byte credit keeps parity at 25 % of the
+  video, so frames of one to three packets share protection rather than
+  overspend.
+- Parity uses the Cauchy code of waybeam-link (PROTOCOL.md §14.1), ported to
+  C with its NEON multiply; on an SSC338Q a 12+2 block encodes in 54 µs. The
+  port matches the spec's byte vectors from waybeam-link's own encoder.
+- Basis, 2026-11-21 bench: blind air loss 0.26–0.47 % with bursts of at most
+  6 packets; 25 % RS cut broken frames 57–145×.
+- `GET /api/v1/transport/status` adds `fecParityPkts` and `fecUnprotected` on
+  `udp://` and `unix://`.
+
 ## [0.86.5] - 2026-11-14
 
 CV610 clean-up after 0.86.2-0.86.4; no behaviour change.

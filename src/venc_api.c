@@ -530,6 +530,12 @@ static const FieldUi ui_snapshot_height = {
 	"Max encodable height of the MJPEG snapshot channel. 0 = inherit the "
 	"main stream; see the width field."
 };
+static const FieldUi ui_outgoing_fec = {
+	"Outgoing", "RS parity (FEC)", "toggle", 0, 0, 0, NULL,
+	"Send Reed-Solomon parity after each frame so a waybeam-now ground can "
+	"rebuild lost packets. video0.bitrate stays the total: the encoder gets "
+	"4/5, parity the rest. RTP over udp:// or unix://, maxPayloadSize <= 1400."
+};
 static const FieldUi ui_qr_tap_enabled = {
 	"QR", "Luma tap", "toggle", 0, 0, 0, NULL,
 	"Enable the overlay-free NV12 luma tap on VPE port1 (Star6E). Unlike the "
@@ -586,6 +592,7 @@ static const FieldDesc g_fields[] = {
 	FIELD(outgoing, server,            FT_STRING, MUT_LIVE),
 	FIELD(outgoing, stream_mode,       FT_STRING, MUT_RESTART),
 	FIELD(outgoing, max_payload_size,  FT_UINT16, MUT_LIVE),
+	FIELD_UI(outgoing, fec,            FT_BOOL,   MUT_RESTART, &ui_outgoing_fec),
 	FIELD(outgoing, connected_udp,     FT_BOOL,   MUT_RESTART),
 	FIELD(outgoing, allow_unix_encoder_stall, FT_BOOL, MUT_RESTART),
 	FIELD(outgoing, audio_port,        FT_INT,    MUT_RESTART),
@@ -1102,6 +1109,12 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 	    strcmp(canonical_key, "isp.awb_fps") == 0)
 		return 0;
 
+	/* RS parity is built in the Star6E output batch only; Maruko has its
+	 * own sender (protocols/venc-fec.md). */
+	if (backend_name && strcmp(backend_name, "maruko") == 0 &&
+	    strcmp(canonical_key, "outgoing.fec") == 0)
+		return 0;
+
 	/* Image stabilization (video0.framing=stab + the stab_* / pause_stab tuning
 	 * group) is now supported on Maruko/I6C: the IVE motion detector works once
 	 * the BSP-matched libmi_ive.so is installed (see the builder osdrv override),
@@ -1511,6 +1524,21 @@ static const char *validate_field_cfg(const VencConfig *cfg, const char *key)
 		    v > VENC_OUTPUT_PAYLOAD_CEILING_BYTES)
 			return "outgoing.max_payload_size must be in range [576, 4000]";
 	}
+	if (cfg->outgoing.fec && strncmp(key, "outgoing.", 9) == 0) {
+		/* Parity rides the udp:// / unix:// RTP path and must fit 1420 B;
+		 * on shm it would cost 1/5 of the encoder rate and send nothing. */
+		VencOutputUri uri;
+
+		if (cfg->outgoing.max_payload_size > VENC_FEC_MAX_PAYLOAD_BYTES)
+			return "outgoing.fec requires outgoing.max_payload_size <= 1400";
+		if (strcmp(cfg->outgoing.stream_mode, "rtp") != 0)
+			return "outgoing.fec requires outgoing.stream_mode=rtp";
+		if (cfg->outgoing.server[0] &&
+		    (venc_config_parse_output_uri(cfg->outgoing.server, &uri) != 0 ||
+		     (uri.type != VENC_OUTPUT_URI_UDP &&
+		      uri.type != VENC_OUTPUT_URI_UNIX)))
+			return "outgoing.fec requires a udp:// or unix:// server";
+	}
 	if (strcmp(key, "detect.net_width") == 0 ||
 	    strcmp(key, "detect.net_height") == 0) {
 		/* Tap/model dims must be a multiple of 32 (>=64) — the YOLO head
@@ -1564,6 +1592,7 @@ const char *venc_api_validate_loaded_config(const VencConfig *cfg)
 		"fpv.roi_steps",
 		"fpv.roi_center",
 		"outgoing.max_payload_size",
+		"outgoing.fec",
 		"snapshot.quality",
 	};
 	size_t i;

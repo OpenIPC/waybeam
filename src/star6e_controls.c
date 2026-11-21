@@ -277,7 +277,10 @@ static int apply_bitrate(uint32_t kbps)
 
 	/* Order is pinned: the >120 fps exact-CBR compensation first, then the
 	 * absolute MIN/MAX rails, so the correction cannot push the programmed
-	 * value outside what the encoder accepts. */
+	 * value outside what the encoder accepts.  With RS parity on, kbps is
+	 * the wire total and the encoder gets its video share. */
+	kbps = venc_fec_video_kbps(g_star6e_control_ctx.pipeline &&
+		g_star6e_control_ctx.pipeline->output.fec_arena, kbps);
 	kbps = rc_compensate_kbps(kbps, g_star6e_control_ctx.delivered_fps);
 	if (kbps > VENC_BITRATE_MAX_KBPS)
 		kbps = VENC_BITRATE_MAX_KBPS;
@@ -1672,6 +1675,8 @@ static char *query_transport_status(void)
 			"\"pressureDrops\":%u,"
 			"\"transportDrops\":%u,"
 			"\"packetsSent\":%u,"
+			"\"fecParityPkts\":%u,"
+			"\"fecUnprotected\":%u,"
 			"\"badAuDrops\":%llu}}",
 			transport,
 			(unsigned)fill_pct,
@@ -1680,6 +1685,10 @@ static char *query_transport_status(void)
 			(unsigned)__atomic_load_n(&ps->output.socket_drops,
 				__ATOMIC_RELAXED),
 			(unsigned)__atomic_load_n(&ps->output.socket_writes,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&ps->output.fec_parity_pkts,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&ps->output.fec_unprotected,
 				__ATOMIC_RELAXED),
 			(unsigned long long)__atomic_load_n(
 				&ps->output.bad_au_drops, __ATOMIC_RELAXED));

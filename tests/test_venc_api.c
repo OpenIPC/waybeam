@@ -2257,6 +2257,50 @@ static int test_frame_gate_loaded_config_bounds(void)
 	return failures;
 }
 
+/* outgoing.fec rides the RTP socket path only and must fit 1420 B
+ * (protocols/venc-fec.md): every rule, plus the fec-off control. */
+static int test_outgoing_fec_validation(void)
+{
+	static const struct {
+		const char *name, *server, *mode;
+		uint16_t payload;
+		bool fec, ok;
+	} c[] = {
+		{ "fec off, shm, 4000 B (control)", "shm://x", "rtp", 4000, false, true },
+		{ "fec udp 1400", "udp://127.0.0.1:5600", "rtp", 1400, true, true },
+		{ "fec unix 1400", "unix://now-video", "rtp", 1400, true, true },
+		{ "fec no server", "", "rtp", 1400, true, true },
+		{ "fec 1401 B", "udp://127.0.0.1:5600", "rtp", 1401, true, false },
+		{ "fec shm", "shm://x", "rtp", 1400, true, false },
+		{ "fec frame-shm", "frame-shm://x", "rtp", 1400, true, false },
+		{ "fec compact", "udp://127.0.0.1:5600", "compact", 1400, true, false },
+	};
+	VencConfig cfg;
+	int failures = 0;
+	size_t i;
+
+	for (i = 0; i < sizeof(c) / sizeof(c[0]); i++) {
+		venc_config_defaults(&cfg);
+		snprintf(cfg.outgoing.server, sizeof(cfg.outgoing.server), "%s",
+			c[i].server);
+		snprintf(cfg.outgoing.stream_mode,
+			sizeof(cfg.outgoing.stream_mode), "%s", c[i].mode);
+		cfg.outgoing.max_payload_size = c[i].payload;
+		cfg.outgoing.fec = c[i].fec;
+		CHECK(c[i].name,
+			(venc_api_validate_loaded_config(&cfg) == NULL) == c[i].ok);
+	}
+	CHECK("fec supported star6e",
+		venc_api_field_supported_for_backend("star6e", "outgoing.fec") == 1);
+	CHECK("fec unsupported maruko",
+		venc_api_field_supported_for_backend("maruko", "outgoing.fec") == 0);
+	CHECK("fec unsupported cv610",
+		venc_api_field_supported_for_backend("cv610", "outgoing.fec") == 0);
+	CHECK("fec video share 8000 -> 6400", venc_fec_video_kbps(1, 8000) == 6400);
+	CHECK("fec off keeps the total", venc_fec_video_kbps(0, 8000) == 8000);
+	return failures;
+}
+
 static int test_resilience_preset_preserves_intra_refresh_qp(void)
 {
 	int failures = 0;
@@ -2778,6 +2822,7 @@ int test_venc_api(void)
 	failures += test_active_precrop_setter();
 	failures += test_register_with_callbacks();
 	failures += test_field_support_by_backend();
+	failures += test_outgoing_fec_validation();
 	failures += test_cv610_restart_only_mutability();
 	failures += test_qr_window_live_config_only();
 	failures += test_multi_set_live_success();

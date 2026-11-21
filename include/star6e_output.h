@@ -49,7 +49,16 @@ typedef struct {
 	int requested_connected_udp;
 	int allow_unix_encoder_stall;
 	int has_server;
+	int fec; /* outgoing.fec: RS parity after each frame (udp/unix RTP) */
 } Star6eOutputSetup;
+
+/* RS parity, protocols/venc-fec.md. */
+#define STAR6E_FEC_PT 100
+#define STAR6E_FEC_SSRC_XOR 0x52534643u
+#define STAR6E_FEC_MAX_SRC 256    /* source packets protected per frame */
+#define STAR6E_FEC_BLOCK_MAX 40   /* sources per block (encode-time cap) */
+#define STAR6E_FEC_SYM_MAX (2 + VENC_FEC_MAX_PAYLOAD_BYTES) /* length + payload */
+#define STAR6E_FEC_HDR 6
 
 /* Per-frame sendmmsg batch. We own `scratch[slot]` containing
  * [RTP header || payload1] concatenated — both the header (built on the
@@ -109,6 +118,16 @@ typedef struct {
 	uint32_t socket_drops;
 	uint32_t socket_writes;
 	Star6eOutputBatch batch;
+	/* RS parity state (NULL arena = off): this frame's source symbols and
+	 * the parity stream's own RTP state.  Producer thread only, except the
+	 * two counters (atomic relaxed, read by the API). */
+	uint8_t *fec_arena;
+	uint16_t fec_count;
+	uint16_t fec_base_seq;
+	RtpPacketizerState fec_rtp;
+	int64_t fec_credit; /* parity bytes owed, x VENC_FEC_PARITY_DIV */
+	uint32_t fec_parity_pkts;
+	uint32_t fec_unprotected;
 	/* Window state for the reading above.  PER OUTPUT, not a file-static
 	 * singleton: a second frame-shm output (dual-stream ch1) is a second
 	 * ring with its own occupancy, and a shared tracker cannot represent

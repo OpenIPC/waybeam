@@ -26,6 +26,18 @@ extern "C" {
 #define VENC_OUTPUT_PAYLOAD_CEILING_BYTES 4000
 #define VENC_OUTPUT_PAYLOAD_MIN_BYTES 576
 
+/* outgoing.fec (protocols/venc-fec.md): parity is 1/VENC_FEC_PARITY_DIV of
+ * the video, and the commanded video0.bitrate is the TOTAL on the wire, so
+ * the encoder gets DIV/(DIV+1) of it.  The payload cap keeps a parity
+ * datagram within waybeam-now's 1420 B. */
+#define VENC_FEC_PARITY_DIV 4
+#define VENC_FEC_MAX_PAYLOAD_BYTES 1400
+static inline uint32_t venc_fec_video_kbps(int fec, uint32_t total_kbps)
+{
+	return fec ? (uint32_t)((uint64_t)total_kbps * VENC_FEC_PARITY_DIV /
+		(VENC_FEC_PARITY_DIV + 1)) : total_kbps;
+}
+
 /* Practical VENC bitrate bounds (kbps).  The min floor guards against
  * impractically low targets the encoder can't honor — below ~1 Mbit/s the
  * H.26x stream collapses (decoder drops SVC-T, RC oscillates).  Enforced as a
@@ -252,6 +264,7 @@ typedef struct {
 	                                      * or "shm://name" */
 	char stream_mode[16];               /* "rtp" or "compact" */
 	uint16_t max_payload_size;
+	bool fec;                       /* RS parity, protocols/venc-fec.md */
 	bool connected_udp;             /* connect() socket (skip per-packet routing) */
 	bool allow_unix_encoder_stall;   /* preserve blocking unix:// send semantics */
 	int32_t audio_port;                 /* <0  = record-only: audio is captured and
