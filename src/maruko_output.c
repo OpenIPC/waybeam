@@ -402,6 +402,8 @@ static int maruko_batch_flush(MarukoOutput *output)
 	return (int)sent_total;
 }
 
+/* No RTP stream-mode check here: validation holds outgoing.fec to
+ * streamMode=rtp, and streamMode is restart-only. */
 int maruko_output_set_fec(MarukoOutput *output, int on)
 {
 	if (!output)

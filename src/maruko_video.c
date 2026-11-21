@@ -324,8 +324,9 @@ static size_t maruko_send_frame_rtp(const i6c_venc_strm *stream,
 	total_bytes = maruko_send_frame_hevc(stream, &ctx, rtp, params,
 		max_payload, stats);
 	(void)maruko_output_end_frame(output);
-	__atomic_store_n(&output->payload_used, (uint16_t)max_payload,
-		__ATOMIC_RELAXED);
+	if (stats->rtp_packets)
+		__atomic_store_n(&output->payload_used, (uint16_t)max_payload,
+			__ATOMIC_RELAXED);
 	output->slice_avg = venc_fec_slice_avg(output->slice_avg,
 		stats->slices, stats->slice_bytes);
 	rtp->timestamp += rtp->frame_ticks;

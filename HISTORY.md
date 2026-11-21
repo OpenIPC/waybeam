@@ -19,7 +19,10 @@ the coordination repo). Contract 0.36.0.
 - **A Maruko config pairing `fec:true` with a `frame-shm://` server (or
   `maxPayloadSize` above 3780) no longer loads,** as on Star6E and CV610.
   Before, Maruko ignored the key. Every backend now validates it, so the
-  per-backend skip from 0.87.4 is gone.
+  per-backend skip from 0.87.4 is gone. Upgrade note: the API never let a
+  Maruko set the key, so only a hand-edited or copied config can carry a
+  stray `fec:true`; such a config now stops venc at startup (no video, no
+  HTTP), so clear the key before upgrading.
 - **An oversize packet no longer splits a frame's batch.** The fallback for
   a packet too big for a batch slot flushed and then reopened the batch,
   taking a new transport snapshot and send budget mid-frame. It now flushes
