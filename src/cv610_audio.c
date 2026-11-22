@@ -238,67 +238,69 @@ static int cv610_aenc_start(Cv610AudioState *state)
 }
 
 /* Derive the audio destination from the video transport.  Shared by the
- * start path and the live retarget so the two cannot drift -- the mapping
- * below (UDP follows the peer, local transports go to loopback) is the whole
- * contract, and having it in one place is what makes a retarget correct by
- * construction rather than by remembering to update a second copy. */
+ * start path and the live retarget so the two cannot drift. */
 static int cv610_audio_derive_output(const VencConfig *config,
-	const VencOutputUri *video_output, VencOutputUri *out, uint16_t *out_port)
+	const VencOutputUri *video_output, VencOutputUri *out)
 {
-	VencOutputUri audio_output;
-	uint16_t port;
-
 	if (!video_output) {
 		fprintf(stderr, "ERROR: CV610 audio has no video transport context\n");
 		return -1;
 	}
-	memset(&audio_output, 0, sizeof(audio_output));
-	audio_output.type = VENC_OUTPUT_URI_UDP;
-	/* Audio is always a separate RTP/UDP stream. UDP video supplies the
+	/* audio_port 0 shares the video destination (udp:// or unix://): own
+	 * socket, SSRC and sequence, same peer, so a single-input consumer
+	 * receives both and splits them by payload type. */
+	if (config->outgoing.audio_port == 0) {
+		if (video_output->type != VENC_OUTPUT_URI_UDP &&
+			video_output->type != VENC_OUTPUT_URI_UNIX) {
+			fprintf(stderr, "ERROR: CV610 audio port 0 needs udp:// or unix:// video\n");
+			return -1;
+		}
+		*out = *video_output;
+		return 0;
+	}
+	/* A dedicated port is a separate RTP/UDP stream. UDP video supplies the
 	 * remote peer; unix:// and frame-shm:// are local video transports, so
-	 * their audio side channel intentionally targets the co-located Waybeam
-	 * Link process on loopback (the established 5601 ingest contract). */
+	 * it targets the co-located link process on loopback (the established
+	 * 5601 ingest contract). */
+	memset(out, 0, sizeof(*out));
+	out->type = VENC_OUTPUT_URI_UDP;
+	out->port = (uint16_t)config->outgoing.audio_port;
 	if (video_output->type == VENC_OUTPUT_URI_UDP) {
-		snprintf(audio_output.host, sizeof(audio_output.host), "%s",
-			video_output->host);
+		snprintf(out->host, sizeof(out->host), "%s", video_output->host);
 	} else if (video_output->type == VENC_OUTPUT_URI_UNIX ||
 		video_output->type == VENC_OUTPUT_URI_FRAME_SHM) {
-		snprintf(audio_output.host, sizeof(audio_output.host), "127.0.0.1");
+		snprintf(out->host, sizeof(out->host), "127.0.0.1");
 	} else {
 		fprintf(stderr, "ERROR: CV610 audio has no mapping for video transport %d\n",
 			video_output->type);
 		return -1;
 	}
-	port = config->outgoing.audio_port == 0 &&
-		video_output->type == VENC_OUTPUT_URI_UDP ? video_output->port :
-		(uint16_t)config->outgoing.audio_port;
-	if (port == 0) {
-		fprintf(stderr, "ERROR: CV610 audio has no UDP destination port\n");
-		return -1;
-	}
-	audio_output.port = port;
-	*out = audio_output;
-	*out_port = port;
 	return 0;
+}
+
+static void cv610_audio_log_target(const VencOutputUri *o)
+{
+	if (o->type == VENC_OUTPUT_URI_UNIX)
+		printf("unix://%s\n", o->endpoint);
+	else
+		printf("udp://%s:%u\n", o->host, o->port);
 }
 
 static int cv610_audio_output_start(Cv610AudioState *state,
 	const VencConfig *config, const VencOutputUri *video_output)
 {
 	VencOutputUri audio_output;
-	uint16_t port;
 
 	if (config->outgoing.audio_port < 0)
 		return 0;
-	if (cv610_audio_derive_output(config, video_output, &audio_output,
-		&port) != 0)
+	if (cv610_audio_derive_output(config, video_output, &audio_output) != 0)
 		return -1;
 	if (output_socket_configure(&state->socket_handle, &state->destination,
 		&state->destination_len, &state->transport, &audio_output,
 		config->outgoing.connected_udp, 0, &state->connected_udp) != 0)
 		return -1;
-	printf("> CV610 audio RTP udp://%s:%u PT=%u clock=48000\n",
-		audio_output.host, port, CV610_AUDIO_PAYLOAD_TYPE);
+	printf("> CV610 audio RTP PT=%u clock=48000 to ", CV610_AUDIO_PAYLOAD_TYPE);
+	cv610_audio_log_target(&audio_output);
 	return 0;
 }
 
@@ -306,16 +308,18 @@ int cv610_audio_apply_server(Cv610AudioState *state, const VencConfig *config,
 	const VencOutputUri *video_output)
 {
 	VencOutputUri audio_output;
-	uint16_t port;
 
-	/* A craft with audio off, or audio_port < 0, has nothing to retarget --
+	/* With audioPort=0 a udp <-> unix switch reopens the audio socket too,
+	 * so the fd-reuse window documented at the top of cv610_runtime.c
+	 * applies to audio as well (at worst one dropped packet).
+	 *
+	 * A craft with audio off, or audio_port < 0, has nothing to retarget --
 	 * not an error, just no work. */
 	if (!state || !config || config->outgoing.audio_port < 0)
 		return 0;
 	if (state->socket_handle < 0)
 		return 0;
-	if (cv610_audio_derive_output(config, video_output, &audio_output,
-		&port) != 0)
+	if (cv610_audio_derive_output(config, video_output, &audio_output) != 0)
 		return -1;
 
 	__atomic_fetch_add(&state->transport_gen, 1, __ATOMIC_RELEASE);
@@ -326,8 +330,8 @@ int cv610_audio_apply_server(Cv610AudioState *state, const VencConfig *config,
 		return -1;
 	}
 	__atomic_fetch_add(&state->transport_gen, 1, __ATOMIC_RELEASE);
-	printf("> CV610 audio retargeted to udp://%s:%u\n", audio_output.host,
-		port);
+	printf("> CV610 audio retargeted to ");
+	cv610_audio_log_target(&audio_output);
 	return 0;
 }
 

@@ -18,7 +18,7 @@
   - `read_only` — cannot be changed via API.
 
 ## Contract Version
-- `contract_version`: `0.36.0`
+- `contract_version`: `0.36.1`
 - `status`: `active`
 
 ## Per-Backend Field Support
@@ -109,8 +109,8 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.89.0",
-    "contract_version": "0.36.0",
+    "app_version": "0.89.1",
+    "contract_version": "0.36.1",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
   }
@@ -636,7 +636,7 @@ curl "http://<device-ip>/api/v1/set?outgoing.server=udp://<receiver-ip>:5600"
 - Live redirects support `udp://` and `unix://`. Live switch to/from `shm://` or `frame-shm://` is not supported (restart required).
 - `connectedUdp` applies only to `udp://`.
 - `shm://` and `frame-shm://` are video-only. They cannot share audio; use a nonzero `audioPort` for separate UDP audio.
-- On Star6E, `audioPort=0` piggybacks on the active video destination for both `udp://` and `unix://`.
+- On every backend, `audioPort=0` sends audio to the active video destination for both `udp://` and `unix://`. In `rtp` mode audio keeps its own SSRC and sequence and is never covered by RS parity; the receiver splits the streams by payload type.
 - On Star6E, a nonzero `audioPort` keeps audio on a dedicated UDP port. With `unix://`, `shm://`, or `frame-shm://` video output, that dedicated audio port is sent to `127.0.0.1:<audioPort>`.
 - `frame-shm://` publishes whole Annex-B frames into an 8-slot SPSC ring (384 KB per slot on Star6E and Maruko, 512 KB on CV610 — 16 × 512 KB is the ring *format*'s default, not what any venc backend creates); each slot is prefixed with an 8-byte `VencFrameMeta` (`pts`, `codec`, `flags`; `flags` bit 0 = IDR). On a full ring the encoder drops the frame and keeps running (never blocks). `outgoing.maxPayloadSize` does not apply (no packetization). `GET /api/v1/transport/status` reports `"transport":"frame-shm"` with `framesSent`/`fillPct`/`transportDrops`/`oversizeDrops`.
 
@@ -2034,6 +2034,10 @@ in Notes. As of `contract_version: 0.29.0`:
 | `isp.aeEngine` ("sdk" only) | applied | applied | Unified AE selector landed in 0.10.13.  `custom` (userspace AE governor) is RETIRED — Maruko in 0.22.0, Star6E in 0.47.0 — and the value was **removed** in 0.47.0.  `sdk` is the only accepted value; any other (e.g. a stale `custom`) warns and falls back to `sdk`.  Both backends run the SDK firmware/bin AE for convergence plus a supervisory thread that enforces the `isp.gain*`/`isp.shutter*` limits.  CV610 has no such thread and reports `isp.aeEngine` unsupported: its ISP owns AE outright, and the two ceilings it does honour are written straight into `ot_isp_exposure_attr.auto_attr` instead. |
 
 ## Change Log (Contract)
+- `0.36.1` (patch; from venc 0.89.1): CV610 accepts `outgoing.audioPort=0`
+  with a `unix://` video server and sends audio to that socket, as Star6E
+  and Maruko do. Before, the config was refused. `frame-shm://` with
+  `audioPort=0` is still refused.
 - `0.36.0` (additive; from venc 0.89.0): `outgoing.fec` is supported on
   Maruko (main stream only), with the same rules and wire as Star6E.
   Maruko's `GET /api/v1/transport/status` on `udp://` and `unix://` gains
