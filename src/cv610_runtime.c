@@ -1466,8 +1466,9 @@ static int cv610_apply_server(const char *uri)
 	if (cv610_audio_apply_server(g_cv610_runner->audio,
 		&g_cv610_runner->config, &parsed) != 0)
 		fprintf(stderr, "WARN: video retargeted to %s but the audio side "
-			"channel could not follow; audio is still going to the "
-			"previous destination\n", uri);
+			"channel could not follow; audio is not reaching it until "
+			"a different outgoing.server is applied or venc restarts\n",
+			uri);
 
 	/* Deliberately NOT fatal past this point, and the reason matters: the
 	 * socket has already moved.  Returning -1 sends venc_api into

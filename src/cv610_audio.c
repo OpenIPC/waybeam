@@ -310,14 +310,15 @@ int cv610_audio_apply_server(Cv610AudioState *state, const VencConfig *config,
 	VencOutputUri audio_output;
 
 	/* With audioPort=0 a udp <-> unix switch reopens the audio socket too,
-	 * so the fd-reuse window documented at the top of cv610_runtime.c
-	 * applies to audio as well (at worst one dropped packet).
+	 * so the gaps in the seqlock note on transport_gen in cv610_runtime.c
+	 * apply to audio as well (at worst one dropped packet).  A failed
+	 * reopen leaves socket_handle -1, and the next retarget opens a fresh
+	 * socket (an identical re-POST stops at cv610_apply_server's no-op
+	 * guard, so it takes a different URI or a restart).
 	 *
 	 * A craft with audio off, or audio_port < 0, has nothing to retarget --
 	 * not an error, just no work. */
 	if (!state || !config || config->outgoing.audio_port < 0)
-		return 0;
-	if (state->socket_handle < 0)
 		return 0;
 	if (cv610_audio_derive_output(config, video_output, &audio_output) != 0)
 		return -1;
@@ -442,18 +443,16 @@ static void *cv610_audio_thread(void *opaque)
 						(uint64_t)now.tv_nsec / 1000ull);
 			}
 			cv610_audio_begin_frame(state);
-			if (state->tx.socket_handle < 0) {
+			if (state->tx.socket_handle >= 0 &&
+				rtp_packetizer_send_packet(&state->rtp,
+					cv610_audio_write, state, stream.stream, stream.len,
+					NULL, 0, first) == 0) {
 				sent = 1;
 			} else {
-				int send_ret = rtp_packetizer_send_packet(&state->rtp,
-					cv610_audio_write, state, stream.stream, stream.len,
-					NULL, 0, first);
-				if (send_ret == 0)
-					sent = 1;
-				else
-					/* Expose the local drop as an RTP sequence gap. The
-					 * packetizer advances only after writer success. */
-					state->rtp.seq++;
+				/* A send failure, or a socket lost to a failed retarget:
+				 * a drop, exposed as an RTP sequence gap.  The packetizer
+				 * advances only after writer success. */
+				state->rtp.seq++;
 			}
 			/* RTP time follows capture cadence even when transport drops. */
 			state->rtp.timestamp += state->ticks_per_frame;

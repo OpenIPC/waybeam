@@ -1,5 +1,16 @@
 # History
 
+## [0.89.2] - 2026-11-22
+
+CV610: a failed audio retarget no longer mutes audio until a restart.
+
+- With `audioPort=0`, a live `udp://` ↔ `unix://` switch reopens the audio
+  socket. If that failed, every later retarget skipped the lost socket; now
+  the next write of a different `outgoing.server` opens a new one (an
+  identical write is a no-op, so a restart also recovers it).
+- Frames with no socket count as drops with an RTP sequence gap, not as sent,
+  and the warning no longer says audio still reaches the old destination.
+
 ## [0.89.1] - 2026-11-22
 
 CV610 can send audio on the `unix://` video socket, so every backend
