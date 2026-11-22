@@ -323,6 +323,10 @@ static int fec_send_frame(Star6eOutput *output, int rx, uint16_t base,
 	int n = 0;
 
 	star6e_output_begin_frame(output);
+	/* These tests check parity, not the 4 ms real-time budget: a loaded
+	 * host (sanitizers, parallel jobs) can take longer than that to send a
+	 * 300-packet frame, which would drop the parity.  Hooks still cut it. */
+	output->batch.flush_budget_us = 1000000;
 	for (unsigned i = 0; i < k; i++) {
 		const uint16_t seq = (uint16_t)(base + i);
 		const size_t len = len_of(i);
