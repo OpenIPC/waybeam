@@ -396,7 +396,7 @@ curl http://<device-ip>:<port>/api/v1/version
 ```
 
 ```json
-{"ok":true,"data":{"app_version":"0.89.0","backend":"star6e","contract_version":"0.36.0","config_schema_version":"1.0.0"}}
+{"ok":true,"data":{"app_version":"0.89.1","backend":"star6e","contract_version":"0.36.1","config_schema_version":"1.0.0"}}
 ```
 
 #### GET /api/v1/config
@@ -1360,10 +1360,15 @@ Notes:
 | `outgoing.sidecar_port` | uint16 | restart | RTP timing sidecar port (0 = disabled) |
 
 `unix://` uses Linux abstract Unix datagram sockets and is available in
-both `rtp` and `compact` mode. On Star6E, `audioPort=0` piggybacks on the
-same active video destination for both `udp://` and `unix://`. `shm://`
-remains RTP-only; it cannot share audio, but a nonzero `audioPort` still
-uses a dedicated local UDP audio destination.
+both `rtp` and `compact` mode. On every backend, `audioPort=0` sends audio
+to the same destination as video for both `udp://` and `unix://` (CV610
+from 0.89.1). Audio keeps its own SSRC and sequence (Opus is PT 98), and
+it never enters RS parity. This is the setting for a link process that
+reads one `unix://` socket: it receives both streams and splits them by
+payload type. A receiver that hands every packet to the video decoder must
+use a dedicated `audioPort` instead. `shm://` and `frame-shm://` cannot
+share audio, but a nonzero `audioPort` still uses a dedicated local UDP
+audio destination.
 
 > **`unix://` requires a deep datagram queue.** Unlike UDP, an AF_UNIX
 > datagram sender blocks on the *receiver's* queue depth. The kernel

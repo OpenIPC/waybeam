@@ -1,5 +1,25 @@
 # History
 
+## [0.89.1] - 2026-11-22
+
+CV610 can send audio on the `unix://` video socket, so every backend
+behaves alike with `outgoing.audioPort=0`. Contract 0.36.1.
+
+- **`audioPort=0` with `unix://` works on CV610.** Validation refused it
+  ("audio port 0 requires a UDP video destination"). Audio now goes to the
+  video's destination for both `udp://` and `unix://`, on its own socket,
+  SSRC and sequence (Opus, PT 98). A link process that reads one `unix://`
+  socket receives both and splits them by payload type. `frame-shm://` with
+  port 0 is still refused: there is no socket to share.
+- **RS parity is unchanged.** It is captured only in the video send path,
+  so audio is never inside a parity block on any backend.
+- **The default is unchanged** (`audioPort` 5601, a separate UDP stream).
+  The `audio_port` comment and README no longer say sharing destabilises
+  the decoder: that holds only for a receiver that does not split by
+  payload type.
+- The CV610 audio start and retarget logs name the real target
+  (`unix://…` or `udp://host:port`).
+
 ## [0.89.0] - 2026-11-22
 
 Maruko sends RS parity (`outgoing.fec`), so a Maruko camera can fly on a

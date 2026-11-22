@@ -77,12 +77,12 @@ const char *cv610_validate_config(const VencConfig *cfg)
 		return "invalid outgoing.server URI";
 	if (uri.type == VENC_OUTPUT_URI_SHM)
 		return "CV610 phase one supports udp://, unix://, or frame-shm:// output";
-	/* unix:// and frame-shm:// are local video transports. Their positive
-	 * audio_port intentionally selects the Waybeam Link loopback UDP side
-	 * channel; port 0 can inherit a destination only from UDP video. */
+	/* A positive audio_port is a UDP side channel (loopback for the local
+	 * transports); port 0 shares the video destination, which frame-shm://
+	 * does not have. */
 	if (cfg->audio.enabled && cfg->outgoing.audio_port == 0 &&
-		uri.type != VENC_OUTPUT_URI_UDP)
-		return "CV610 audio port 0 requires a UDP video destination";
+		uri.type == VENC_OUTPUT_URI_FRAME_SHM)
+		return "CV610 audio port 0 requires a udp:// or unix:// video destination";
 	return NULL;
 }
 

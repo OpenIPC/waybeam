@@ -297,10 +297,12 @@ typedef struct {
 	bool allow_unix_encoder_stall;   /* preserve blocking unix:// send semantics */
 	int32_t audio_port;                 /* <0  = record-only: audio is captured and
 	                                     *       recorded but NEVER streamed (no UDP send)
-	                                     *  0   = same as video port — AVOID: mixing
-	                                     *       audio and video RTP on one socket causes
-	                                     *       video decoder instability at the receiver
-	                                     * >0   = dedicated UDP audio port */
+	                                     *  0   = share the video destination (udp:// or
+	                                     *       unix://); audio keeps its own SSRC and PT, so
+	                                     *       the receiver must split by PT — one that
+	                                     *       feeds every packet to the video decoder breaks
+	                                     * >0   = dedicated UDP audio port (loopback when the
+	                                     *       video output is local) */
 	uint16_t sidecar_port;              /* 0 = disabled */
 } VencConfigOutgoing;
 
