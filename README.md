@@ -1361,14 +1361,11 @@ Notes:
 
 `unix://` uses Linux abstract Unix datagram sockets and is available in
 both `rtp` and `compact` mode. On every backend, `audioPort=0` sends audio
-to the same destination as video for both `udp://` and `unix://` (CV610
-from 0.89.1). Audio keeps its own SSRC and sequence (Opus is PT 98), and
-it never enters RS parity. This is the setting for a link process that
-reads one `unix://` socket: it receives both streams and splits them by
-payload type. A receiver that hands every packet to the video decoder must
-use a dedicated `audioPort` instead. `shm://` and `frame-shm://` cannot
-share audio, but a nonzero `audioPort` still uses a dedicated local UDP
-audio destination.
+to the video destination for `udp://` and `unix://` (CV610 from 0.89.1),
+which suits a link process reading one socket; the receiver splits the
+streams by payload type (details in `documentation/HTTP_API_CONTRACT.md`).
+`shm://` and `frame-shm://` cannot share audio; a nonzero `audioPort` uses
+a dedicated local UDP destination.
 
 > **`unix://` requires a deep datagram queue.** Unlike UDP, an AF_UNIX
 > datagram sender blocks on the *receiver's* queue depth. The kernel

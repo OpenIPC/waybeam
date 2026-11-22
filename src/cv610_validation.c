@@ -77,11 +77,10 @@ const char *cv610_validate_config(const VencConfig *cfg)
 		return "invalid outgoing.server URI";
 	if (uri.type == VENC_OUTPUT_URI_SHM)
 		return "CV610 phase one supports udp://, unix://, or frame-shm:// output";
-	/* A positive audio_port is a UDP side channel (loopback for the local
-	 * transports); port 0 shares the video destination, which frame-shm://
-	 * does not have. */
+	/* Port 0 shares the video destination, so it needs a socket transport;
+	 * the same rule as cv610_audio_derive_output(). */
 	if (cfg->audio.enabled && cfg->outgoing.audio_port == 0 &&
-		uri.type == VENC_OUTPUT_URI_FRAME_SHM)
+		uri.type != VENC_OUTPUT_URI_UDP && uri.type != VENC_OUTPUT_URI_UNIX)
 		return "CV610 audio port 0 requires a udp:// or unix:// video destination";
 	return NULL;
 }

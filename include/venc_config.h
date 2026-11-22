@@ -298,11 +298,8 @@ typedef struct {
 	int32_t audio_port;                 /* <0  = record-only: audio is captured and
 	                                     *       recorded but NEVER streamed (no UDP send)
 	                                     *  0   = share the video destination (udp:// or
-	                                     *       unix://); audio keeps its own SSRC and PT, so
-	                                     *       the receiver must split by PT — one that
-	                                     *       feeds every packet to the video decoder breaks
-	                                     * >0   = dedicated UDP audio port (loopback when the
-	                                     *       video output is local) */
+	                                     *       unix://); the receiver splits by PT
+	                                     * >0   = dedicated UDP audio port */
 	uint16_t sidecar_port;              /* 0 = disabled */
 } VencConfigOutgoing;
 

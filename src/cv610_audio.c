@@ -238,10 +238,7 @@ static int cv610_aenc_start(Cv610AudioState *state)
 }
 
 /* Derive the audio destination from the video transport.  Shared by the
- * start path and the live retarget so the two cannot drift -- the mapping
- * below is the whole contract, and having it in one place is what makes a
- * retarget correct by construction rather than by remembering to update a
- * second copy. */
+ * start path and the live retarget so the two cannot drift. */
 static int cv610_audio_derive_output(const VencConfig *config,
 	const VencOutputUri *video_output, VencOutputUri *out)
 {
@@ -281,12 +278,12 @@ static int cv610_audio_derive_output(const VencConfig *config,
 	return 0;
 }
 
-static void cv610_audio_log_target(const char *prefix, const VencOutputUri *o)
+static void cv610_audio_log_target(const VencOutputUri *o)
 {
 	if (o->type == VENC_OUTPUT_URI_UNIX)
-		printf("%sunix://%s\n", prefix, o->endpoint);
+		printf("unix://%s\n", o->endpoint);
 	else
-		printf("%sudp://%s:%u\n", prefix, o->host, o->port);
+		printf("udp://%s:%u\n", o->host, o->port);
 }
 
 static int cv610_audio_output_start(Cv610AudioState *state,
@@ -302,8 +299,8 @@ static int cv610_audio_output_start(Cv610AudioState *state,
 		&state->destination_len, &state->transport, &audio_output,
 		config->outgoing.connected_udp, 0, &state->connected_udp) != 0)
 		return -1;
-	printf("> CV610 audio RTP PT=%u clock=48000\n", CV610_AUDIO_PAYLOAD_TYPE);
-	cv610_audio_log_target("> CV610 audio to ", &audio_output);
+	printf("> CV610 audio RTP PT=%u clock=48000 to ", CV610_AUDIO_PAYLOAD_TYPE);
+	cv610_audio_log_target(&audio_output);
 	return 0;
 }
 
@@ -329,7 +326,8 @@ int cv610_audio_apply_server(Cv610AudioState *state, const VencConfig *config,
 		return -1;
 	}
 	__atomic_fetch_add(&state->transport_gen, 1, __ATOMIC_RELEASE);
-	cv610_audio_log_target("> CV610 audio retargeted to ", &audio_output);
+	printf("> CV610 audio retargeted to ");
+	cv610_audio_log_target(&audio_output);
 	return 0;
 }
 
