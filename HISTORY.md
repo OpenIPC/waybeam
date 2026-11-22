@@ -4,14 +4,12 @@
 
 CV610: a failed audio retarget no longer mutes audio until a restart.
 
-- **The retarget retries.** With `audioPort=0`, a live `udp://` ↔ `unix://`
-  switch reopens the audio socket (0.89.1). If that reopen failed, the socket
-  was gone and every later retarget skipped it, so audio stayed off until venc
-  restarted. The next `outgoing.server` write now opens a new socket.
-- **Lost audio counts as a drop.** Frames with no socket were counted as sent;
-  they now count as drops and leave an RTP sequence gap, like a failed send.
-  Record-only (`audioPort<0`) still counts as before.
-- The warning no longer claims audio is still going to the old destination.
+- With `audioPort=0`, a live `udp://` ↔ `unix://` switch reopens the audio
+  socket. If that failed, every later retarget skipped the lost socket; now
+  the next write of a different `outgoing.server` opens a new one (an
+  identical write is a no-op, so a restart also recovers it).
+- Frames with no socket count as drops with an RTP sequence gap, not as sent,
+  and the warning no longer says audio still reaches the old destination.
 
 ## [0.89.1] - 2026-11-22
 
