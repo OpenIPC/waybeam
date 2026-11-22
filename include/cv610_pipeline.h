@@ -6,8 +6,11 @@
 #include "cv610_modes.h"
 
 typedef struct {
-	/* Which plugin to dlopen and which sensor id the ISP binds. */
+	/* Which plugin to dlopen, which sensor id the ISP binds, and which
+	 * MIPI-RX lanes carry the data. */
 	const Cv610Sensor *sensor;
+	/* The selected mode's ot_isp_pub_attr.sns_mode hint (0 = plugin picks). */
+	uint8_t sns_mode;
 	/* Sensor capture geometry (what VI and the ISP see). */
 	uint32_t width;
 	uint32_t height;
@@ -20,7 +23,6 @@ typedef struct {
 	 * rather than squashed.  Same rule Star6E and Maruko apply. */
 	int keep_aspect;
 	uint32_t fps;
-	int lanes;
 	int data_rate_x2;
 	int bayer;
 	int raw_bit;

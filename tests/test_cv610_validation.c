@@ -290,6 +290,71 @@ static int test_sensor_table(void)
 		cv610_mode_select(imx335, -1, 30, 4000, 3000, &idx) ==
 			&imx335->modes[0] && idx == 0);
 
+	/* The two-lane row: the same part and plugin on a board that routes two
+	 * lanes.  Getting it wrong is not a worse picture -- four lanes, or lanes
+	 * 0 and 1, deliver no frame at all on such a board. */
+	{
+		const Cv610Sensor *two = cv610_sensor_find("imx335_2l");
+
+		failures += expect("sns_find_imx335_2l", two != NULL);
+		if (two == NULL)
+			return failures;
+		failures += expect("sns_imx335_2l_same_plugin",
+			two->sns_id == 335 &&
+			strcmp(two->plugin_path, imx335->plugin_path) == 0 &&
+			strcmp(two->obj_symbol, imx335->obj_symbol) == 0);
+		/* PHY lanes 0 and 2, as the measured board routes them. */
+		failures += expect("sns_imx335_2l_lanes",
+			two->lane_id[0] == 0 && two->lane_id[1] == 2 &&
+			two->lane_id[2] == -1 && two->lane_id[3] == -1);
+		/* The plugin never picks its two-lane modes from size and rate, so
+		 * each row has to name one. */
+		failures += expect("sns_imx335_2l_modes", two->mode_count == 4 &&
+			two->modes[0].fps == 30 && two->modes[0].sns_mode == 6 &&
+			two->modes[1].fps == 40 && two->modes[1].sns_mode == 7 &&
+			two->modes[2].fps == 45 && two->modes[2].sns_mode == 8 &&
+			two->modes[3].fps == 60 && two->modes[3].sns_mode == 9);
+		/* 30 fps is Sony's setting and must stay what a 30 fps config gets;
+		 * the faster rows leave the vendor tables and are reached only by
+		 * asking for more. */
+		failures += expect("sns_imx335_2l_30_is_vendor_mode",
+			cv610_mode_select(two, -1, 30, 0, 0, &idx) == &two->modes[0] &&
+			cv610_mode_select(two, -1, 25, 0, 0, &idx) == &two->modes[0]);
+		failures += expect("sns_imx335_2l_exact_rates",
+			cv610_mode_select(two, -1, 40, 0, 0, &idx) == &two->modes[1] &&
+			idx == 1 &&
+			cv610_mode_select(two, -1, 45, 0, 0, &idx) == &two->modes[2] &&
+			cv610_mode_select(two, -1, 60, 1920, 1080, &idx) ==
+				&two->modes[3] && idx == 3);
+		/* Between rows the next faster one answers; past the last, the
+		 * fastest. */
+		failures += expect("sns_imx335_2l_between_rates",
+			cv610_mode_select(two, -1, 35, 0, 0, &idx) == &two->modes[1] &&
+			cv610_mode_select(two, -1, 50, 0, 0, &idx) == &two->modes[3] &&
+			cv610_mode_select(two, -1, 100, 0, 0, &idx) == &two->modes[3]);
+		/* The window cannot fill an output larger than itself, so a
+		 * full-sensor output keeps the full sensor and its 45 fps. */
+		failures += expect("sns_imx335_2l_window_never_upscales",
+			cv610_mode_select(two, -1, 60, 2592, 1944, &idx) ==
+				&two->modes[2] &&
+			cv610_mode_select(two, -1, 60, 2560, 1440, &idx) ==
+				&two->modes[3]);
+		setenv("SENSOR", "imx335_2l", 1);
+		failures += expect("sns_current_imx335_2l",
+			cv610_sensor_current() == two);
+	}
+	/* Every other row is matched by size and rate, on all four lanes. */
+	for (j = 0; j < imx335->mode_count; j++)
+		failures += expect("sns_imx335_auto_mode",
+			imx335->modes[j].sns_mode == 0);
+	for (j = 0; j < g_imx662->mode_count; j++)
+		failures += expect("sns_imx662_auto_mode",
+			g_imx662->modes[j].sns_mode == 0);
+	for (j = 0; j < CV610_SENSOR_LANES_MAX; j++)
+		failures += expect("sns_four_lane_rows",
+			imx335->lane_id[j] == (int8_t)j &&
+			g_imx662->lane_id[j] == (int8_t)j);
+
 	/* SENSOR picks the row; anything it cannot name is IMX662. */
 	unsetenv("SENSOR");
 	failures += expect("sns_current_unset_is_imx662",

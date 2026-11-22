@@ -190,11 +190,38 @@ A missing or unknown name comes up as IMX662, with a `WARNING` quoting what
 |---|---|---|---|
 | `imx662` | `/usr/lib/cv610/libsns_imx662.so` | this tree (`sensors/cv610/imx662`) | 1080p30/60 RAW12, 1080p90/100 RAW10 |
 | `imx335` | `/usr/lib/sensors/libsns_imx335.so` | the image (OpenIPC/openhisilicon `sony_imx335`) | 2592x1944p30 RAW12, 1296x972p60 binned, 1080p90 crop, 2592x1944p40, 2592x1520p30 crop |
+| `imx335_2l` | the same plugin | the image, with the plugin's modes 6 to 9 | 2592x1944p30, p40 and p45 and a 2560x1440p60 window, RAW10, on two lanes |
 
 IMX662 stays waybeam's own because 1080p100 needs the daemon's clock switch
 (see "Sensor clock") and the image's copy refuses that mode. `make stage`
 puts it in `out/cv610/cv610/`; a firmware package must install it to
 `/usr/lib/cv610/`, out of reach of the image's copy in `/usr/lib/sensors/`.
+
+`imx335_2l` is an IMX335 on a board that routes only two of its CSI-2 data
+lanes, onto MIPI-RX PHY lanes 0 and 2. A row carries the board's lane wiring
+as well as the part, because the `imx335` row on such a board is not a worse
+picture but none: the receiver counts CRC errors and measures a 0x0 frame.
+The u-boot `sensor` name cannot reach this row — it has to stay a name
+sys_config knows, `imx335` — so the craft names it in
+`/etc/waybeam-cv610.conf` (`SENSOR=imx335_2l`), which `S95waybeam` reads
+before it asks u-boot. The plugin never picks its two-lane modes from size
+and rate, so each row passes the mode's number in `pub.sns_mode`:
+
+- `video0.fps` up to 30 runs mode 6, Sony's two-lane setting.
+- Up to 40 runs mode 7: Sony's clocks with a shorter line. **Not** a vendor
+  setting, but nothing in the sensor runs faster than Sony specifies.
+- Up to 45 runs mode 8, which also runs the sensor's clock tree 6.25% above
+  Sony's tables. That is as far as the picture allows: from 9.4% a well-lit
+  scene shows pattern noise in its dark areas.
+- Above 45 runs mode 9 at 60 fps, on the same clocks: a 2560x1440 **window**,
+  74% of the sensor's height, so the vertical field of view narrows. It is
+  only chosen for a `video0.size` it can fill; a 2592x1944 output stays on
+  mode 8. The plugin refuses vertical flip in the window.
+- Native-size output is encoder-bound: about 43 fps at 2592x1944 and 58 fps
+  at 2560x1440. Scaled output holds the sensor's rate.
+
+`documentation/CV610_IMX335_2LANE_FPS_TESTS.md` has the measurements, the
+limits behind each setting, and what was not measured.
 
 IMX335 needs no workaround in the plugin: every mode runs on 37.125 MHz and
 `pub.sns_mode` stays 0 ("auto"), the plugin picking its mode from the exact
@@ -395,3 +422,14 @@ frame-SHM at 1080p30/60/100. Slice requests 1, 3, 4, 6, 9, 12 and 17 produced
 the requested VCL census; a 380-frame IDR-started 1080p60 capture decoded
 cleanly with FFmpeg `-xerror`; and GDR/ENHANCE metadata, TRAIL_N rewriting and
 one-second loss recovery passed. Only a longer-duration soak remains pending.
+
+On 2026-11-21 the `imx335_2l` row was run on a Hi3516CV613 + IMX335 module
+whose board routes PHY lanes 0 and 2, on a stock OpenIPC image's modules (no
+`sns0_clk_hz`; the loaded 37.125 MHz clock is the right one). The daemon was
+started by hand with `SENSOR=imx335_2l` — `S95waybeam` and
+`load-cv610-online` were not exercised on that craft. At 1920x1080 with
+`isp.keepAspect=false`, in daylight: 30.01, 40.06, 45.04 and 60.01 fps at the
+ISP and the encoder on modes 6 to 9, no MIPI error, snapshots clean; 60 fps
+held for 3 minutes; mirror+flip at 45 fps; a flip request at 60 fps left the
+picture upright with the plugin's log line; 21.9 MiB of MMZ in use. The
+`imx335` row on the same board delivered no frame.

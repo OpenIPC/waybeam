@@ -15,10 +15,10 @@
  * 27 MHz clock.  Only 100 fps takes the sensor's 24 MHz INCK profile
  * overclocked to 27 MHz (INCK_SEL 0x04); the rest run 37.125 MHz. */
 static const Cv610SensorMode g_imx662_modes[] = {
-	{ 1920, 1080,  30, 12, 37125000u, "1080p30 RAW12" },
-	{ 1920, 1080,  60, 12, 37125000u, "1080p60 RAW12" },
-	{ 1920, 1080,  90, 10, 37125000u, "1080p90 RAW10" },
-	{ 1920, 1080, 100, 10, 27000000u, "1080p100 RAW10" },
+	{ 1920, 1080,  30, 12, 37125000u, "1080p30 RAW12", 0 },
+	{ 1920, 1080,  60, 12, 37125000u, "1080p60 RAW12", 0 },
+	{ 1920, 1080,  90, 10, 37125000u, "1080p90 RAW10", 0 },
+	{ 1920, 1080, 100, 10, 27000000u, "1080p100 RAW10", 0 },
 };
 
 /* ---- IMX335: 2592x1944 and crops, five fixed modes -----------------------
@@ -34,23 +34,44 @@ static const Cv610SensorMode g_imx662_modes[] = {
  * plugin refuses vertical flip in the two crop windows and logs why; their
  * labels say so, since /api/v1/modes is where an operator reads them. */
 static const Cv610SensorMode g_imx335_modes[] = {
-	{ 2592, 1944, 30, 12, 37125000u, "2592x1944p30 RAW12" },
-	{ 1296,  972, 60, 10, 37125000u, "1296x972p60 RAW10 binned" },
-	{ 1920, 1080, 90, 10, 37125000u, "1080p90 RAW10 crop, no V-flip" },
-	{ 2592, 1944, 40, 10, 37125000u, "2592x1944p40 RAW10" },
-	{ 2592, 1520, 30, 10, 37125000u, "2592x1520p30 RAW10 crop, no V-flip" },
+	{ 2592, 1944, 30, 12, 37125000u, "2592x1944p30 RAW12", 0 },
+	{ 1296,  972, 60, 10, 37125000u, "1296x972p60 RAW10 binned", 0 },
+	{ 1920, 1080, 90, 10, 37125000u, "1080p90 RAW10 crop, no V-flip", 0 },
+	{ 2592, 1944, 40, 10, 37125000u, "2592x1944p40 RAW10", 0 },
+	{ 2592, 1520, 30, 10, 37125000u, "2592x1520p30 RAW10 crop, no V-flip", 0 },
+};
+
+/* ---- IMX335 on two CSI-2 lanes ------------------------------------------
+ *
+ * For a board that routes two of the sensor's data lanes.  The plugin never
+ * picks its two-lane modes from size and rate -- the lane count is the
+ * board's, not the picture's -- so each row names one (openhisilicon's
+ * sony_imx335 modes 6 to 9).  Only 30 fps is a vendor setting; 45 fps and
+ * the 2560x1440 window run the clock tree 6.25% fast.  Measurements and
+ * limits: documentation/CV610_IMX335_2LANE_FPS_TESTS.md. */
+static const Cv610SensorMode g_imx335_2l_modes[] = {
+	{ 2592, 1944, 30, 10, 37125000u, "2592x1944p30 RAW10 2-lane", 6 },
+	{ 2592, 1944, 40, 10, 37125000u, "2592x1944p40 RAW10 2-lane", 7 },
+	{ 2592, 1944, 45, 10, 37125000u, "2592x1944p45 RAW10 2-lane", 8 },
+	{ 2560, 1440, 60, 10, 37125000u,
+	  "2560x1440p60 RAW10 2-lane window, no V-flip", 9 },
 };
 
 #define TABLE(t) (t), (sizeof(t) / sizeof((t)[0]))
+#define LANES_4 { 0, 1, 2, 3 }
 
 /* IMX662 is waybeam's own plugin, built from sensors/cv610/imx662 and kept
  * out of /usr/lib/sensors so an image's stock copy (which refuses 100 fps)
  * can never stand in for it.  IMX335 is the image's. */
 static const Cv610Sensor g_sensors[] = {
 	{ "imx662", "/usr/lib/cv610/libsns_imx662.so", "g_sns_imx662_obj", 662,
-	  TABLE(g_imx662_modes) },
+	  TABLE(g_imx662_modes), LANES_4 },
 	{ "imx335", "/usr/lib/sensors/libsns_imx335.so", "g_sns_imx335_obj", 335,
-	  TABLE(g_imx335_modes) },
+	  TABLE(g_imx335_modes), LANES_4 },
+	/* Lanes 0 and 2, not 0 and 1: where the measured board's data arrives,
+	 * with PHY lanes 1 and 3 idle. */
+	{ "imx335_2l", "/usr/lib/sensors/libsns_imx335.so", "g_sns_imx335_obj",
+	  335, TABLE(g_imx335_2l_modes), { 0, 2, -1, -1 } },
 };
 
 const Cv610Sensor *cv610_sensor_find(const char *name)

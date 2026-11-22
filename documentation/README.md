@@ -6,6 +6,11 @@ This folder is the canonical place for waybeam_venc project documentation.
 - `documentation/SSC338Q_CV610_ENCODER_CAPABILITIES.md`
   - Evidence-tiered comparison of the two encoder APIs and their current
     Waybeam integration, including the richer CV610-only future surface.
+- `documentation/CV610_IMX335_2LANE_FPS_TESTS.md`
+  - The IMX335 two-lane modes on CV610 (30, 40 and 45 fps full sensor, a
+    2560x1440 window at 60) and the measured limits behind them: the HMAX and
+    VMAX floors, how far the sensor PLL goes before the picture breaks, and
+    the ISP-clock ceiling.
 - `documentation/CV610_RESILIENCE_SLICES_PLAN.md`
   - Approved phased plan and device gates for CV610 resilience, ref prediction,
     frame metadata and whole-access-unit H.265 slicing.

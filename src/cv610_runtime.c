@@ -2415,13 +2415,13 @@ static int cv610_prepare(void *opaque)
 	 * contract star6e_pipeline.c fulfils after sensor_select(). */
 	venc_api_set_sensor_info(0, mode_index, cfg->sensor.index);
 	ctx->pipeline.sensor = sensor;
+	ctx->pipeline.sns_mode = mode->sns_mode;
 	ctx->pipeline.width = mode->width;
 	ctx->pipeline.height = mode->height;
 	cv610_mode_resolve_output(mode, cfg->video0.width, cfg->video0.height,
 		&ctx->pipeline.out_width, &ctx->pipeline.out_height);
 	ctx->pipeline.keep_aspect = cfg->isp.keep_aspect ? 1 : 0;
 	ctx->pipeline.fps = mode->fps;
-	ctx->pipeline.lanes = 4;
 	ctx->pipeline.data_rate_x2 = 0;
 	ctx->pipeline.bayer = 0;
 	ctx->pipeline.mirror = cfg->image.mirror ? 1 : 0;

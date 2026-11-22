@@ -21,11 +21,16 @@ typedef struct {
 	uint32_t raw_bit;          /* MIPI RAW bit depth carried by this mode */
 	uint32_t sensor_clock_hz;  /* MCLK the mode's line timing assumes */
 	const char *desc;          /* /api/v1/modes label */
+	/* ot_isp_pub_attr.sns_mode: 0 lets the plugin match the mode by capture
+	 * size and rate; nonzero names one it never picks that way. */
+	uint8_t sns_mode;
 } Cv610SensorMode;
 
+#define CV610_SENSOR_LANES_MAX 4
+
 /* One sensor the CV610 backend drives: the userspace plugin it dlopens, what
- * the ISP binds it as, and its modes.  Adding a sensor is one row in
- * cv610_modes.c plus its mode table. */
+ * the ISP binds it as, how the board routes its lanes, and its modes.  Adding
+ * a sensor is one row in cv610_modes.c plus its mode table. */
 typedef struct {
 	const char *name;          /* the system's name for the part ($SENSOR) */
 	const char *plugin_path;   /* dlopen'd userspace sensor driver */
@@ -34,6 +39,11 @@ typedef struct {
 	                            * the plugin's own *_ID */
 	const Cv610SensorMode *modes;
 	size_t mode_count;
+	/* The MIPI-RX PHY lane carrying each of the sensor's data lanes, in the
+	 * sensor's lane order; -1 past the last.  This is the board's wiring, not
+	 * the part's: the same sensor on a board that routes fewer lanes is its
+	 * own row, with the modes that many lanes can carry. */
+	int8_t lane_id[CV610_SENSOR_LANES_MAX];
 } Cv610Sensor;
 
 /* The sensor with this name, ignoring case, or NULL. */
@@ -44,7 +54,10 @@ const Cv610Sensor *cv610_sensor_find(const char *name);
  *
  * $SENSOR is the u-boot `sensor` name: OpenIPC's rcS exports it, its module
  * loader brings the sensor up by it, and S95waybeam asks fw_printenv/ipcinfo
- * when started without it.  It picks the plugin and the mode table; waybeam's
+ * when started without it.  A row the u-boot name cannot reach -- a wiring
+ * variant such as imx335_2l, which sys_config would not know as a sensor --
+ * is named by SENSOR= in /etc/waybeam-cv610.conf, which S95waybeam reads
+ * first.  It picks the plugin and the mode table; waybeam's
  * own load-cv610-online loads the modules by CV610_SENSOR_PROFILE instead, a
  * boot clock the daemon then overrides per mode.  The daemon never changes its
  * environment, so every call answers the same. */
