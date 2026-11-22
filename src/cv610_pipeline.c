@@ -80,7 +80,7 @@ typedef struct {
 	unsigned int width;
 	unsigned int height;
 	float        fps;
-	int          sns_mode;     /* ot_isp_pub_attr.sns_mode hint */
+	uint8_t      sns_mode;     /* ot_isp_pub_attr.sns_mode hint */
 	int          data_rate_x2; /* MIPI_DATA_RATE_X1 or X2 */
 	int          bayer;        /* ot_isp_bayer_format 0..3 */
 	int          raw_bit;      /* 10 or 12 */
@@ -183,11 +183,11 @@ static int mipi_setup(const Cv610PipelineRuntimeConfig *c)
 	attr.mipi_attr.input_data_type =
 		(c->raw_bit == 10) ? DATA_TYPE_RAW_10BIT : DATA_TYPE_RAW_12BIT;
 	attr.mipi_attr.wdr_mode = OT_MIPI_WDR_MODE_NONE;
+	_Static_assert(MIPI_LANE_NUM == CV610_SENSOR_LANES_MAX,
+		"Cv610Sensor.lane_id must cover every MIPI-RX lane");
 	for (i = 0; i < MIPI_LANE_NUM; i++) {
-		short id = (i < CV610_SENSOR_LANES_MAX) ? c->sensor->lane_id[i] : -1;
-
-		attr.mipi_attr.lane_id[i] = id;
-		if (id >= 0)
+		attr.mipi_attr.lane_id[i] = c->sensor->lane_id[i];
+		if (c->sensor->lane_id[i] >= 0)
 			lanes++;
 	}
 
@@ -559,7 +559,7 @@ static int isp_setup(const Cv610PipelineRuntimeConfig *c)
 	 * driver comment warns about. */
 	pub.bayer_format    = (ot_isp_bayer_format)c->bayer;
 	pub.wdr_mode        = OT_WDR_MODE_NONE;
-	pub.sns_mode        = (td_u8)c->sns_mode;
+	pub.sns_mode        = c->sns_mode;
 
 	/* Tell the ISP which registered 3A libs and which sensor this pipe uses;
 	 * without it isp_mem_init cannot resolve the sensor and fails NOT_CFG. */

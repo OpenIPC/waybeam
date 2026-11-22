@@ -10,7 +10,7 @@ typedef struct {
 	 * MIPI-RX lanes carry the data. */
 	const Cv610Sensor *sensor;
 	/* The selected mode's ot_isp_pub_attr.sns_mode hint (0 = plugin picks). */
-	int sns_mode;
+	uint8_t sns_mode;
 	/* Sensor capture geometry (what VI and the ISP see). */
 	uint32_t width;
 	uint32_t height;

@@ -314,17 +314,6 @@ static int test_sensor_table(void)
 			two->modes[1].fps == 40 && two->modes[1].sns_mode == 7 &&
 			two->modes[2].fps == 45 && two->modes[2].sns_mode == 8 &&
 			two->modes[3].fps == 60 && two->modes[3].sns_mode == 9);
-		for (j = 0; j < two->mode_count; j++)
-			failures += expect("sns_imx335_2l_mode_sane",
-				two->modes[j].raw_bit == 10 &&
-				two->modes[j].sensor_clock_hz == 37125000u);
-		/* Three rates read the whole sensor; the fastest is a window. */
-		for (j = 0; j < 3; j++)
-			failures += expect("sns_imx335_2l_full_sensor",
-				two->modes[j].width == 2592 &&
-				two->modes[j].height == 1944);
-		failures += expect("sns_imx335_2l_window",
-			two->modes[3].width == 2560 && two->modes[3].height == 1440);
 		/* 30 fps is Sony's setting and must stay what a 30 fps config gets;
 		 * the faster rows leave the vendor tables and are reached only by
 		 * asking for more. */

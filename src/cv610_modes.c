@@ -41,23 +41,14 @@ static const Cv610SensorMode g_imx335_modes[] = {
 	{ 2592, 1520, 30, 10, 37125000u, "2592x1520p30 RAW10 crop, no V-flip", 0 },
 };
 
-/* ---- IMX335 on two CSI-2 lanes: three full-sensor rates and a window -----
+/* ---- IMX335 on two CSI-2 lanes ------------------------------------------
  *
- * For a board that routes only two of the sensor's data lanes.  Every row
- * above drives four, which such a board receives as CRC errors and no frame,
- * so these ask the plugin for its two-lane modes by number: it never picks
- * them from size and rate, because the lane count is the board's, not the
- * picture's.  They need openhisilicon's sony_imx335 with modes 6 to 9.
- *
- * 30 fps is Sony's two-lane setting.  The others are not vendor settings.
- * 40 fps keeps Sony's clocks and shortens the line.  45 fps and the window
- * run the sensor's clock tree 6.25% above the vendor tables, which is as far
- * as the picture allows: from 9.4% a well-lit scene shows pattern noise in
- * its dark areas.  The 60 fps row is a 2560x1440 window, 74% of the sensor's
- * height, so asking for more than 45 fps also narrows the vertical field of
- * view.  Measured on a Hi3516CV613 module wired to PHY lanes 0 and 2;
- * documentation/CV610_IMX335_2LANE_FPS_TESTS.md has the measurements, and
- * what was not measured. */
+ * For a board that routes two of the sensor's data lanes.  The plugin never
+ * picks its two-lane modes from size and rate -- the lane count is the
+ * board's, not the picture's -- so each row names one (openhisilicon's
+ * sony_imx335 modes 6 to 9).  Only 30 fps is a vendor setting; 45 fps and
+ * the 2560x1440 window run the clock tree 6.25% fast.  Measurements and
+ * limits: documentation/CV610_IMX335_2LANE_FPS_TESTS.md. */
 static const Cv610SensorMode g_imx335_2l_modes[] = {
 	{ 2592, 1944, 30, 10, 37125000u, "2592x1944p30 RAW10 2-lane", 6 },
 	{ 2592, 1944, 40, 10, 37125000u, "2592x1944p40 RAW10 2-lane", 7 },
