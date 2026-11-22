@@ -1,5 +1,22 @@
 # History
 
+## [0.90.1] - 2026-11-22
+
+`/api/v1/modes` reports the size the encoder runs at.
+
+- **`data.encode_width` / `data.encode_height`:** the size the main encoder
+  channel was created at, published by each backend (Star6E, Maruko, CV610)
+  right after creating it, so after the clamp to the sensor mode, zoom and
+  framing. `0` until a channel has been created; afterwards the last
+  created channel's size.
+- **Why:** `video0.size` is what was *requested*. A request larger than the
+  selected sensor mode is clamped silently, and `/api/v1/config` keeps
+  reporting the request: on an SSC338Q, `video0.size=1920x1080` on the
+  1728x972 mode encodes 1728x972. An overlay client that sized its region
+  from `video0.size` came out 1908x1080 on a 1728x972 picture, its bottom
+  rows and right edge cut off. With the new fields it fits (measured).
+- No behaviour change otherwise; existing fields unchanged.
+
 ## [0.90.0] - 2026-11-22
 
 CV610 drives an IMX335 on a board that routes two CSI-2 lanes.

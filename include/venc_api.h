@@ -200,7 +200,8 @@ void venc_api_set_sensor_info(int pad, int mode_index, int forced_pad);
 
 /* The size the main encoder channel was created at, after the clamp to the
  * sensor mode, zoom and framing — set by the backend once the channel exists,
- * exposed as /api/v1/modes encode_width/encode_height (0 until then).
+ * exposed as /api/v1/modes encode_width/encode_height (0 until the first one;
+ * after that the last created channel's size).
  * video0.size is what was REQUESTED and can be larger. */
 void venc_api_set_encode_size(uint32_t width, uint32_t height);
 

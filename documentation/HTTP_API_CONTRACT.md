@@ -1779,8 +1779,8 @@ driver enumerates so callers can show an "available modes" UI.
 
 `encode_width` / `encode_height` are the size the main encoder channel was
 created at: `video0.size` after the clamp to the selected sensor mode, zoom
-and framing — the resolution in the stream's SPS. `0` until the channel
-exists. Use these, not `video0.size`, for anything that must match the
+and framing — the resolution in the stream's SPS. `0` until a channel has
+been created; after that, the last created channel's size. Use these, not `video0.size`, for anything that must match the
 encoded picture (an overlay region, a receiver's expectations):
 `video0.size` is what was *requested*, and a request larger than the sensor
 mode is clamped silently (`video0.size=1920x1080` on a 1728x972 mode encodes
