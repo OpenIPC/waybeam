@@ -37,11 +37,12 @@ typedef struct {
 	uint32_t image_width;
 	uint32_t image_height;
 	uint32_t sensor_fps;
-	uint32_t venc_max_rate;
+	uint32_t venc_max_rate;      /* video0.bitrate: the wire total */
 	uint32_t venc_gop_size;
 	double venc_gop_seconds;
 	uint16_t max_frame_size;
 	uint16_t rtp_payload_size;
+	bool fec;                    /* outgoing.fec at startup */
 	VencOutputUri output_uri;
 	uint16_t sidecar_port;
 	PAYLOAD_TYPE_E rc_codec;

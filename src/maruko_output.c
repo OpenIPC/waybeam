@@ -402,6 +402,26 @@ static int maruko_batch_flush(MarukoOutput *output)
 	return (int)sent_total;
 }
 
+/* No RTP stream-mode check here: validation holds outgoing.fec to
+ * streamMode=rtp, and streamMode is restart-only. */
+int maruko_output_set_fec(MarukoOutput *output, int on)
+{
+	if (!output)
+		return -1;
+	if (on && !output->fec.arena && (output->ring || output->frame_ring ||
+	    (output->transport != VENC_OUTPUT_URI_UDP &&
+	     output->transport != VENC_OUTPUT_URI_UNIX)))
+		return -1;
+	return venc_fec_set(&output->fec, on);
+}
+
+/* Video datagrams this output has failed to send, by any cause. */
+static uint32_t maruko_output_lost(const MarukoOutput *output)
+{
+	return __atomic_load_n(&output->socket_drops, __ATOMIC_RELAXED) +
+		output->send_errors;
+}
+
 void maruko_output_begin_frame(MarukoOutput *output)
 {
 	MarukoOutputBatch *b;
@@ -415,6 +435,8 @@ void maruko_output_begin_frame(MarukoOutput *output)
 	b->flush_budget_us = MARUKO_OUTPUT_FLUSH_BUDGET_US;
 	b->discard_remaining = 0;
 	b->discard_as_error = 0;
+	venc_fec_begin_frame(&output->fec);
+	output->fec_lost0 = maruko_output_lost(output);
 
 	/* SHM output is not batched — skip the snapshot entirely. */
 	if (output->ring)
@@ -448,6 +470,25 @@ void maruko_output_begin_frame(MarukoOutput *output)
 	b->active = (b->socket_handle >= 0) ? 1 : 0;
 }
 
+int maruko_output_flush(MarukoOutput *output)
+{
+	return maruko_batch_flush(output);
+}
+
+static int maruko_fec_write(const uint8_t *header, size_t header_len,
+	const uint8_t *payload1, size_t payload1_len,
+	const uint8_t *payload2, size_t payload2_len, void *opaque)
+{
+	return maruko_output_batch_enqueue(opaque, header, header_len,
+		payload1, payload1_len, payload2, payload2_len);
+}
+
+/* Video first, so the frame never waits on its parity encode (Star6E's
+ * star6e_output_end_frame).  No parity once the frame's budget is spent or
+ * the socket gave up; the frame counts as unprotected only if its video all
+ * went out, since a refused packet is already a transport drop.  fec.count
+ * is 0 unless fec.frame latched on.  Parity is counted as it reaches the
+ * socket. */
 int maruko_output_end_frame(MarukoOutput *output)
 {
 	int sent;
@@ -455,6 +496,20 @@ int maruko_output_end_frame(MarukoOutput *output)
 	if (!output || !output->batch.active)
 		return 0;
 	sent = maruko_batch_flush(output);
+	if (output->fec.count && output->batch.discard_remaining) {
+		if (maruko_output_lost(output) == output->fec_lost0)
+			__atomic_fetch_add(&output->fec.unprotected,
+				output->fec.count, __ATOMIC_RELAXED);
+	} else if (output->fec.count) {
+		const uint32_t w0 = __atomic_load_n(&output->socket_writes,
+			__ATOMIC_RELAXED);
+
+		venc_fec_emit(&output->fec, maruko_fec_write, output);
+		sent += maruko_batch_flush(output);
+		__atomic_fetch_add(&output->fec.parity_pkts,
+			__atomic_load_n(&output->socket_writes, __ATOMIC_RELAXED) - w0,
+			__ATOMIC_RELAXED);
+	}
 	output->batch.active = 0;
 	return sent;
 }
@@ -556,4 +611,5 @@ void maruko_output_teardown(MarukoOutput *output)
 	output->batch.active = 0;
 	output->batch.count = 0;
 	output->batch.socket_handle = -1;
+	venc_fec_free(&output->fec);
 }

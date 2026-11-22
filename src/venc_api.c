@@ -1115,12 +1115,6 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 	    strcmp(canonical_key, "isp.awb_fps") == 0)
 		return 0;
 
-	/* RS parity is sent by Star6E and CV610 only; the Maruko sender has
-	 * none (protocols/venc-fec.md). */
-	if (backend_name && strcmp(backend_name, "maruko") == 0 &&
-	    strcmp(canonical_key, "outgoing.fec") == 0)
-		return 0;
-
 	/* Image stabilization (video0.framing=stab + the stab_* / pause_stab tuning
 	 * group) is now supported on Maruko/I6C: the IVE motion detector works once
 	 * the BSP-matched libmi_ive.so is installed (see the builder osdrv override),
@@ -1562,14 +1556,12 @@ static const char *validate_field_cfg(const VencConfig *cfg, const char *key)
  * whole staged config, never per key: `fec=true&maxPayloadSize=1400` must
  * pass in either order.  Parity rides the udp:// / unix:// RTP path and must
  * fit 3800 B; on shm it would cost 1/5 of the encoder rate and send nothing.
- * A backend without parity ignores the key, so a stray fec:true (a config
- * copied from a Star6E camera) must not block its other outgoing keys. */
-static const char *validate_fec_cfg(const VencConfig *cfg, const char *backend)
+ * Every backend sends parity. */
+static const char *validate_fec_cfg(const VencConfig *cfg)
 {
 	VencOutputUri uri;
 
-	if (!cfg->outgoing.fec || (backend &&
-	    !venc_api_field_supported_for_backend(backend, "outgoing.fec")))
+	if (!cfg->outgoing.fec)
 		return NULL;
 	if (cfg->outgoing.max_payload_size > VENC_FEC_MAX_PAYLOAD_BYTES)
 		return "outgoing.fec requires outgoing.max_payload_size <= 3780";
@@ -1621,14 +1613,7 @@ const char *venc_api_validate_loaded_config(const VencConfig *cfg)
 		if (err)
 			return err;
 	}
-	/* g_backend is registered only after load: name the build's own. */
-#if HAVE_BACKEND_MARUKO
-	err = validate_fec_cfg(cfg, "maruko");
-#elif HAVE_BACKEND_CV610
-	err = validate_fec_cfg(cfg, "cv610");
-#else
-	err = validate_fec_cfg(cfg, NULL);
-#endif
+	err = validate_fec_cfg(cfg);
 	if (err)
 		return err;
 #if HAVE_BACKEND_CV610
@@ -2616,7 +2601,7 @@ static int stage_params_into_cfg(VencConfig *cfg, const SetQueryParam *params,
 	}
 
 	{
-		const char *err = validate_fec_cfg(cfg, g_backend);
+		const char *err = validate_fec_cfg(cfg);
 
 		if (!err)
 			err = validate_backend_config(g_backend, cfg);

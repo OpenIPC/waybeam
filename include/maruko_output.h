@@ -3,6 +3,7 @@
 
 #include "output_socket.h"
 #include "venc_config.h"
+#include "venc_fec.h"
 #include "venc_frame_ring.h"
 #include "venc_ring.h"
 
@@ -86,6 +87,14 @@ typedef struct {
 	uint32_t socket_drops;
 	uint32_t socket_writes;
 	MarukoOutputBatch batch;
+	/* RS parity (protocols/venc-fec.md), ch0 only.  fec_lost0 is
+	 * socket_drops + send_errors at begin_frame; slice_avg sizes the
+	 * payload with parity on; payload_used is what the last RTP frame
+	 * used (atomic relaxed, read by the status API). */
+	VencFec fec;
+	uint32_t fec_lost0;
+	uint32_t slice_avg;
+	uint16_t payload_used;
 	/* Transport-pressure observation cache.  Mirrors Star6eOutput; see
 	 * the docstring there.  Populated once per frame by
 	 * maruko_output_observe_pressure, read by the sidecar emit and by
@@ -152,6 +161,12 @@ int maruko_output_frame_ring_fill(
 
 /** Change output destination URI without stopping streaming (udp:// or unix://). */
 int maruko_output_apply_server(MarukoOutput *output, const char *uri);
+/* Live outgoing.fec: -1 unless the output is udp:// / unix:// RTP or when
+ * the parity arena cannot be allocated. */
+int maruko_output_set_fec(MarukoOutput *output, int on);
+/* Flush the queued packets, keeping the frame's batch open.  Only while
+ * the batch is active. */
+int maruko_output_flush(MarukoOutput *output);
 
 /** Begin accumulating RTP packets for a frame. When the transport is UDP
  *  and SHM is not in use, subsequent enqueues queue into a sendmmsg()

@@ -208,13 +208,12 @@ static int maruko_rtp_write(const uint8_t *header, size_t header_len,
 	if (output->batch.active) {
 		if (maruko_output_batch_enqueue(output, header, header_len,
 		    payload1, payload1_len, payload2, payload2_len) == 0)
-			return 0;
+			goto sent;
 		/* Scratch slot too small for this packet — flush anything
 		 * already queued (to preserve ordering), then fall through to
-		 * immediate send. */
-		(void)maruko_output_end_frame(output);
-		/* Reopen the batch for subsequent packets in this frame. */
-		maruko_output_begin_frame(output);
+		 * immediate send.  The frame keeps its batch, so its parity
+		 * still follows all of its video. */
+		(void)maruko_output_flush(output);
 	}
 
 	/* Fallback: either batch inactive or packet too big for scratch —
@@ -227,6 +226,12 @@ static int maruko_rtp_write(const uint8_t *header, size_t header_len,
 		return -1;
 	}
 	__atomic_fetch_add(&output->socket_writes, 1, __ATOMIC_RELAXED);
+sent:
+	/* After a successful write only: the packetizer advances seq only
+	 * then, so source i is always seq base_seq + i. */
+	if (output->fec.frame)
+		venc_fec_capture(&output->fec, header, payload1, payload1_len,
+			payload2, payload2_len);
 	return 0;
 }
 
@@ -300,6 +305,7 @@ static size_t maruko_send_frame_rtp(const i6c_venc_strm *stream,
 		.output = output,
 		.ring = output ? output->ring : NULL,
 	};
+	HevcRtpStats frame_stats = {0};
 	size_t total_bytes;
 
 	if (!stream || !output || !rtp)
@@ -310,9 +316,19 @@ static size_t maruko_send_frame_rtp(const i6c_venc_strm *stream,
 
 	/* Open sendmmsg batch for UDP; no-op for SHM. */
 	maruko_output_begin_frame(output);
+	if (output->fec.frame)
+		max_payload = venc_fec_payload_size((uint16_t)max_payload,
+			output->slice_avg);
+	if (!stats)
+		stats = &frame_stats; /* slice sizes, every frame */
 	total_bytes = maruko_send_frame_hevc(stream, &ctx, rtp, params,
 		max_payload, stats);
 	(void)maruko_output_end_frame(output);
+	if (stats->rtp_packets)
+		__atomic_store_n(&output->payload_used, (uint16_t)max_payload,
+			__ATOMIC_RELAXED);
+	output->slice_avg = venc_fec_slice_avg(output->slice_avg,
+		stats->slices, stats->slice_bytes);
 	rtp->timestamp += rtp->frame_ticks;
 	return total_bytes;
 }

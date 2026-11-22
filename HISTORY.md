@@ -1,5 +1,46 @@
 # History
 
+## [0.89.0] - 2026-11-22
+
+Maruko sends RS parity (`outgoing.fec`), so a Maruko camera can fly on a
+link whose ground recovers lost packets from it (`protocols/venc-fec.md` in
+the coordination repo). Contract 0.36.0.
+
+- **Same producer and rules as Star6E and CV610.** The shared
+  `src/venc_fec.c` runs on Maruko's `udp://` / `unix://` RTP batch: parity
+  after each frame's video in the same `sendmmsg` batch, PT 100, 25 % of the
+  video bytes, the payload sized by the slice average, the encoder given 4/5
+  of `video0.bitrate`. A live toggle re-programs the encoder in Star6E's
+  order, so the wire never carries more than `video0.bitrate`.
+- **Main stream only.** The dual-stream second channel has its own output
+  and sends no parity.
+- **`GET /api/v1/transport/status`** on `udp://` / `unix://` gains
+  `fecParityPkts`, `fecUnprotected` and `rtpPayload`, as on the others.
+- **A Maruko config pairing `fec:true` with a `frame-shm://` server (or
+  `maxPayloadSize` above 3780) no longer loads,** as on Star6E and CV610.
+  Before, Maruko ignored the key. Every backend now validates it, so the
+  per-backend skip from 0.87.4 is gone. Upgrade note: the API never let a
+  Maruko set the key, so only a hand-edited or copied config can carry a
+  stray `fec:true`; such a config now stops venc at startup (no video, no
+  HTTP), so clear the key before upgrading.
+- **An oversize packet no longer splits a frame's batch.** The fallback for
+  a packet too big for a batch slot flushed and then reopened the batch,
+  taking a new transport snapshot and send budget mid-frame. It now flushes
+  and keeps the frame's batch, so parity always follows all of its video.
+  (A slot holds 4096 B and payloads stop at 4000, so this was not reached.)
+- **Measured on a Maruko (SSC378QE, IMX335, 30 fps, about 6 Mbit/s)**
+  against an independent checker that re-encodes every parity symbol from
+  the captured sources:
+  - FEC from startup: 683 of 683 parity datagrams byte-exact, 25.0 % of the
+    video bytes, and every one of 584 frames rebuilt a dropped source;
+  - started off, then enabled live: 388 of 388 byte-exact, parity from the
+    next frame;
+  - CPU: 7.8 % of the core with parity, 7.5 % without;
+  - a toggle, like a `video0.bitrate` write, emits one IDR (three spaced
+    bitrate writes gave three IRAP access units, and none came between them).
+    The comment in `maruko_apply_bitrate` that called this an untested
+    assumption now cites the measurement.
+
 ## [0.88.4] - 2026-11-21
 
 Maruko: three exposure and timing fixes.

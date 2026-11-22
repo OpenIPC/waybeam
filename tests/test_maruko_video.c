@@ -1,9 +1,14 @@
 #include "maruko_video.h"
+#include "rs_fec.h"
 #include "test_helpers.h"
 #include "venc_rec_writer.h"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 /* ── maruko_video_stream_flatten: the async recorder's copy ───────────── */
 
@@ -105,6 +110,185 @@ static int test_maruko_flatten_refuses_an_access_unit_over_the_queue_cap(void)
 	return failures;
 }
 
+
+/* ── RS parity on the Maruko RTP path (protocols/venc-fec.md) ─────────── */
+
+#define MK_FEC_SLICES 5
+#define MK_FEC_MAX_PKTS 64
+
+typedef struct {
+	uint8_t d[MK_FEC_MAX_PKTS][4096];
+	ssize_t len[MK_FEC_MAX_PKTS];
+	int n;
+} MkFecRx;
+
+/* One non-IRAP access unit: MK_FEC_SLICES TRAIL_R slices of 800..1200 B,
+ * one pack, one packetInfo per slice.  Payload bytes are never 0, so no
+ * start code is emulated. */
+static void mk_fec_frame(i6c_venc_pack *pack, i6c_venc_strm *stream,
+	uint8_t *buf, unsigned frame)
+{
+	size_t off = 0;
+
+	memset(pack, 0, sizeof(*pack));
+	memset(stream, 0, sizeof(*stream));
+	for (unsigned s = 0; s < MK_FEC_SLICES; s++) {
+		const size_t len = 800 + s * 100;
+
+		pack->packetInfo[s].offset = (MI_U32)off;
+		pack->packetInfo[s].length = (MI_U32)(3 + 2 + len);
+		buf[off++] = 0; buf[off++] = 0; buf[off++] = 1;
+		buf[off++] = 0x02; buf[off++] = 0x01; /* TRAIL_R, tid 1 */
+		for (size_t j = 0; j < len; j++)
+			buf[off++] = (uint8_t)(((frame + s) * 31u + j * 7u) | 1u);
+	}
+	pack->data = buf;
+	pack->length = (MI_U32)off;
+	pack->packNum = MK_FEC_SLICES;
+	stream->packet = pack;
+	stream->count = 1;
+}
+
+static void mk_fec_recv(int rx, MkFecRx *r)
+{
+	r->n = 0;
+	while (r->n < MK_FEC_MAX_PKTS) {
+		r->len[r->n] = recv(rx, r->d[r->n], sizeof(r->d[0]), MSG_DONTWAIT);
+		if (r->len[r->n] <= 0)
+			break;
+		r->n++;
+	}
+}
+
+/* Re-encode every parity datagram from the source datagrams received
+ * before it (symbol = 2-byte length + RTP payload, zero-padded to the
+ * block's longest); return the parity count, -1 on any mismatch. */
+static int mk_fec_check(const MkFecRx *r, int *sources)
+{
+	static uint8_t sym[VENC_FEC_BLOCK_MAX][VENC_FEC_SYM_MAX];
+	static uint8_t want[VENC_FEC_BLOCK_MAX][VENC_FEC_SYM_MAX];
+	const uint16_t seq0 = (uint16_t)(r->d[0][2] << 8 | r->d[0][3]);
+	const uint32_t ssrc = ((uint32_t)r->d[0][8] << 24 |
+		(uint32_t)r->d[0][9] << 16 | (uint32_t)r->d[0][10] << 8 |
+		r->d[0][11]) ^ VENC_FEC_SSRC_XOR;
+	int nsrc = 0, parity = 0;
+
+	while (nsrc < r->n && (r->d[nsrc][1] & 0x7F) != VENC_FEC_PT)
+		nsrc++;
+	*sources = nsrc;
+	for (int p = nsrc; p < r->n; p++) {
+		const uint8_t *d = r->d[p];
+		const unsigned k = d[14], idx = d[15];
+		const uint16_t base = (uint16_t)(d[16] << 8 | d[17]);
+		const unsigned first = (uint16_t)(base - seq0);
+		size_t maxlen = 0;
+
+		/* Header per the spec: PT 100 with M=0, the XORed SSRC, 0x7E,
+		 * version 0 and C=001, E exactly on the frame's last block. */
+		if (d[1] != VENC_FEC_PT || d[12] != 0x7E ||
+		    (d[13] & 0xC7) != 0x01 || k == 0 ||
+		    k > VENC_FEC_BLOCK_MAX || idx >= k ||
+		    first + k > (unsigned)nsrc ||
+		    ((uint32_t)d[8] << 24 | (uint32_t)d[9] << 16 |
+		     (uint32_t)d[10] << 8 | d[11]) != ssrc ||
+		    ((d[13] & 0x20) != 0) != (first + k == (unsigned)nsrc))
+			return -1;
+		memset(sym, 0, sizeof(sym));
+		for (unsigned i = 0; i < k; i++) {
+			const size_t len = (size_t)r->len[first + i] - 12;
+
+			sym[i][0] = (uint8_t)(len >> 8);
+			sym[i][1] = (uint8_t)len;
+			memcpy(sym[i] + 2, r->d[first + i] + 12, len);
+			if (len > maxlen)
+				maxlen = len;
+		}
+		rs_fec_encode(k, idx + 1, sym[0], sizeof(sym[0]), 2 + maxlen,
+			want[0], sizeof(want[0]));
+		if (r->len[p] != (ssize_t)(12 + VENC_FEC_HDR + 2 + maxlen) ||
+		    memcmp(d + 12 + VENC_FEC_HDR, want[idx], 2 + maxlen) != 0)
+			return -1;
+		parity++;
+	}
+	return parity;
+}
+
+/* The whole Maruko send path with outgoing.fec: off sends video only at
+ * the configured payload; on sends parity after the frame's video, sized by
+ * the slice average; a live toggle takes effect at the next frame. */
+static int test_maruko_video_fec(void)
+{
+	static uint8_t buf[MK_FEC_SLICES * 1300];
+	static MkFecRx r;
+	MarukoOutput output;
+	MarukoBackendConfig cfg;
+	MarukoRtpState rtp;
+	H26xParamSets params;
+	VencOutputUri uri;
+	i6c_venc_pack pack;
+	i6c_venc_strm stream;
+	struct sockaddr_in a = { .sin_family = AF_INET };
+	socklen_t alen = sizeof(a);
+	char server[64];
+	int failures = 0, rx, sources = 0, parity;
+	unsigned f = 0;
+	uint32_t par0;
+
+	rx = socket(AF_INET, SOCK_DGRAM, 0);
+	a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	CHECK("mk fec: receiver", rx >= 0 &&
+		bind(rx, (struct sockaddr *)&a, sizeof(a)) == 0 &&
+		getsockname(rx, (struct sockaddr *)&a, &alen) == 0);
+	snprintf(server, sizeof(server), "udp://127.0.0.1:%u",
+		(unsigned)ntohs(a.sin_port));
+	memset(&output, 0, sizeof(output));
+	memset(&cfg, 0, sizeof(cfg));
+	memset(&params, 0, sizeof(params));
+	cfg.stream_mode = MARUKO_STREAM_RTP;
+	cfg.rc_codec = PT_H265;
+	cfg.rtp_payload_size = 3780;
+	maruko_video_init_rtp_state(&rtp, PT_H265, 60);
+	CHECK("mk fec: output", venc_config_parse_output_uri(server, &uri) == 0 &&
+		maruko_output_init(&output, &uri, 0, 0) == 0);
+
+	mk_fec_frame(&pack, &stream, buf, f++);
+	(void)maruko_video_send_frame(&stream, &output, &rtp, &params, &cfg, NULL);
+	mk_fec_recv(rx, &r);
+	CHECK("mk fec off: one datagram per slice, no parity, full payload",
+		r.n == MK_FEC_SLICES && mk_fec_check(&r, &sources) == 0 &&
+		output.payload_used == 3780 && !output.fec.arena);
+
+	CHECK("mk fec: enable", maruko_output_set_fec(&output, 1) == 0);
+	for (int i = 0; i < 3; i++) {
+		mk_fec_frame(&pack, &stream, buf, f++);
+		(void)maruko_video_send_frame(&stream, &output, &rtp, &params,
+			&cfg, NULL);
+		mk_fec_recv(rx, &r);
+		parity = mk_fec_check(&r, &sources);
+		CHECK("mk fec on: video first, then parity that re-encodes",
+			sources == MK_FEC_SLICES && parity >= 1);
+	}
+	/* Mean slice 1000 B (+ 2 B NAL header): 3/2 of it, above the floor. */
+	CHECK("mk fec on: payload follows the slice average",
+		output.payload_used == 1503);
+	CHECK("mk fec on: parity counted",
+		output.fec.parity_pkts >= 3 && output.fec.unprotected == 0);
+
+	par0 = output.fec.parity_pkts;
+	CHECK("mk fec: disable", maruko_output_set_fec(&output, 0) == 0);
+	mk_fec_frame(&pack, &stream, buf, f++);
+	(void)maruko_video_send_frame(&stream, &output, &rtp, &params, &cfg, NULL);
+	mk_fec_recv(rx, &r);
+	CHECK("mk fec off again: video only",
+		r.n == MK_FEC_SLICES && mk_fec_check(&r, &sources) == 0 &&
+		output.fec.parity_pkts == par0 && output.payload_used == 3780);
+
+	maruko_output_teardown(&output);
+	CHECK("mk fec: teardown frees the arena", !output.fec.arena);
+	close(rx);
+	return failures;
+}
+
 int test_maruko_video(void)
 {
 	MarukoOutput output;
@@ -115,6 +299,7 @@ int test_maruko_video(void)
 
 	failures += test_maruko_flatten_matches_the_star6e_contract();
 	failures += test_maruko_flatten_refuses_an_access_unit_over_the_queue_cap();
+	failures += test_maruko_video_fec();
 	unsigned int info_cap;
 
 	memset(&output, 0, sizeof(output));
