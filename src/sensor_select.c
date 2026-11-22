@@ -240,7 +240,8 @@ static size_t json_escape_into(char *dst, size_t dst_sz, const char *src)
 	return w;
 }
 
-char *sensor_modes_json(int forced_pad, int selected_pad, int selected_mode)
+char *sensor_modes_json(int forced_pad, int selected_pad, int selected_mode,
+	uint32_t encode_width, uint32_t encode_height)
 {
 	size_t cap = 4096;
 	char *buf = malloc(cap);
@@ -248,8 +249,9 @@ char *sensor_modes_json(int forced_pad, int selected_pad, int selected_mode)
 	size_t off = 0;
 
 	int n = snprintf(buf, cap,
-		"{\"ok\":true,\"data\":{\"selected_pad\":%d,\"selected_mode\":%d,\"pads\":[",
-		selected_pad, selected_mode);
+		"{\"ok\":true,\"data\":{\"selected_pad\":%d,\"selected_mode\":%d,"
+		"\"encode_width\":%u,\"encode_height\":%u,\"pads\":[",
+		selected_pad, selected_mode, encode_width, encode_height);
 	if (n > 0) off = (size_t)n < cap ? (size_t)n : cap - 1;
 
 	int pad_start = 0, pad_end = 3;

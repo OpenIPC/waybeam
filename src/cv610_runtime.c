@@ -2101,6 +2101,7 @@ static int cv610_venc_start(Cv610RunnerContext *ctx)
 		return -1;
 	}
 	ctx->venc_created = 1;
+	venc_api_set_encode_size(attr.venc_attr.pic_width, attr.venc_attr.pic_height);
 	/* Seed from the API's own seconds->frames arithmetic — deliberately NOT the
 	 * local `gop` above, and not a driver readback. This value exists only so
 	 * cv610_apply_gop() can recognise the API replaying the value it believes is

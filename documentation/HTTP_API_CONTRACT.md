@@ -1757,6 +1757,8 @@ Response `200`:
   "data": {
     "selected_pad": 0,
     "selected_mode": 1,
+    "encode_width": 1920,
+    "encode_height": 1080,
     "pads": [
       {
         "pad": 0,
@@ -1774,6 +1776,17 @@ Response `200`:
 `selected_pad` / `selected_mode` reflect the currently-active pipeline
 selection.  The full `pads[].modes[]` list always shows every mode the
 driver enumerates so callers can show an "available modes" UI.
+
+`encode_width` / `encode_height` are the size the main encoder channel was
+created at: `video0.size` after the clamp to the selected sensor mode, zoom
+and framing — the resolution in the stream's SPS. `0` until the channel
+exists. Use these, not `video0.size`, for anything that must match the
+encoded picture (an overlay region, a receiver's expectations):
+`video0.size` is what was *requested*, and a request larger than the sensor
+mode is clamped silently (`video0.size=1920x1080` on a 1728x972 mode encodes
+1728x972 while `/api/v1/config` still reports 1920x1080). Neither
+`pads[].modes[].width/height` nor `desc` is a substitute: the clamp uses the
+mode's usable output, which can be smaller than its capture `width`.
 
 **CV610 note — every advertised mode is selectable, but only against a
 sys_config that exposes the runtime sensor clock.** The IMX662 runs 30/60/90
