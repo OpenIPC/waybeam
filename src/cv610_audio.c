@@ -309,7 +309,11 @@ int cv610_audio_apply_server(Cv610AudioState *state, const VencConfig *config,
 {
 	VencOutputUri audio_output;
 
-	/* A craft with audio off, or audio_port < 0, has nothing to retarget --
+	/* With audioPort=0 a udp <-> unix switch reopens the audio socket too,
+	 * so the fd-reuse window documented at the top of cv610_runtime.c
+	 * applies to audio as well (at worst one dropped packet).
+	 *
+	 * A craft with audio off, or audio_port < 0, has nothing to retarget --
 	 * not an error, just no work. */
 	if (!state || !config || config->outgoing.audio_port < 0)
 		return 0;

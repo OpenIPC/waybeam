@@ -1362,8 +1362,8 @@ Notes:
 `unix://` uses Linux abstract Unix datagram sockets and is available in
 both `rtp` and `compact` mode. On every backend, `audioPort=0` sends audio
 to the video destination for `udp://` and `unix://` (CV610 from 0.89.1),
-which suits a link process reading one socket; the receiver splits the
-streams by payload type (details in `documentation/HTTP_API_CONTRACT.md`).
+which suits a link process reading one socket; in `rtp` mode the receiver
+splits the streams by payload type (details in `documentation/HTTP_API_CONTRACT.md`).
 `shm://` and `frame-shm://` cannot share audio; a nonzero `audioPort` uses
 a dedicated local UDP destination.
 

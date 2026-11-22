@@ -636,7 +636,7 @@ curl "http://<device-ip>/api/v1/set?outgoing.server=udp://<receiver-ip>:5600"
 - Live redirects support `udp://` and `unix://`. Live switch to/from `shm://` or `frame-shm://` is not supported (restart required).
 - `connectedUdp` applies only to `udp://`.
 - `shm://` and `frame-shm://` are video-only. They cannot share audio; use a nonzero `audioPort` for separate UDP audio.
-- On every backend, `audioPort=0` sends audio to the active video destination for both `udp://` and `unix://`. Audio keeps its own SSRC and sequence and is never covered by RS parity; the receiver splits the streams by payload type.
+- On every backend, `audioPort=0` sends audio to the active video destination for both `udp://` and `unix://`. In `rtp` mode audio keeps its own SSRC and sequence and is never covered by RS parity; the receiver splits the streams by payload type.
 - On Star6E, a nonzero `audioPort` keeps audio on a dedicated UDP port. With `unix://`, `shm://`, or `frame-shm://` video output, that dedicated audio port is sent to `127.0.0.1:<audioPort>`.
 - `frame-shm://` publishes whole Annex-B frames into an 8-slot SPSC ring (384 KB per slot on Star6E and Maruko, 512 KB on CV610 — 16 × 512 KB is the ring *format*'s default, not what any venc backend creates); each slot is prefixed with an 8-byte `VencFrameMeta` (`pts`, `codec`, `flags`; `flags` bit 0 = IDR). On a full ring the encoder drops the frame and keeps running (never blocks). `outgoing.maxPayloadSize` does not apply (no packetization). `GET /api/v1/transport/status` reports `"transport":"frame-shm"` with `framesSent`/`fillPct`/`transportDrops`/`oversizeDrops`.
 
