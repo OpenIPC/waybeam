@@ -3,6 +3,7 @@
  * of source i = (i*37 + j*11 + 5) & 0xFF; parity N is the full symbol. */
 #include "rs_fec.h"
 #include "test_helpers.h"
+#include "venc_fec.h"
 
 #include <string.h>
 
@@ -79,6 +80,71 @@ static int test_rs_fec_long_symbols(void)
 	return failures;
 }
 
+/* L (protocols/venc-fec.md byte 13, 0x10): exactly one per frame with
+ * parity, on the last parity datagram sent; E on the last block's parity. */
+static uint8_t g_flags[64];
+static unsigned g_nflags;
+
+static int keep_flags(const uint8_t *header, size_t header_len,
+	const uint8_t *payload1, size_t payload1_len,
+	const uint8_t *payload2, size_t payload2_len, void *opaque)
+{
+	(void)header; (void)header_len; (void)payload1_len;
+	(void)payload2; (void)payload2_len; (void)opaque;
+	if (g_nflags < sizeof(g_flags))
+		g_flags[g_nflags++] = payload1[1];
+	return 0;
+}
+
+static unsigned emit_frame(unsigned sources, size_t len)
+{
+	static uint8_t payload[1400];
+	VencFec fec;
+	uint8_t hdr[12] = { 0x80, 96 };
+	unsigned i;
+
+	memset(&fec, 0, sizeof(fec));
+	memset(payload, 0x5A, sizeof(payload));
+	g_nflags = 0;
+	if (venc_fec_set(&fec, 1) != 0)
+		return 0;
+	venc_fec_begin_frame(&fec);
+	for (i = 0; i < sources; i++) {
+		hdr[2] = (uint8_t)(i >> 8);
+		hdr[3] = (uint8_t)i;
+		venc_fec_capture(&fec, hdr, payload, len, NULL, 0);
+	}
+	venc_fec_emit(&fec, keep_flags, NULL);
+	venc_fec_free(&fec);
+	return g_nflags;
+}
+
+static int test_venc_fec_last_parity(void)
+{
+	static const struct { unsigned sources; size_t len; } frames[] = {
+		{ 11, 1000 }, /* one block, as most frames on .232 */
+		{ 100, 1200 }, /* three blocks */
+		{ 1, 10 },     /* too small for any parity */
+	};
+	int failures = 0;
+	size_t f;
+
+	for (f = 0; f < sizeof(frames) / sizeof(frames[0]); f++) {
+		const unsigned n = emit_frame(frames[f].sources, frames[f].len);
+		unsigned i, l = 0;
+
+		for (i = 0; i < n; i++)
+			l += (g_flags[i] & 0x10) != 0;
+		CHECK("venc_fec: L on exactly one datagram of a frame with parity",
+			n ? l == 1 && (g_flags[n - 1] & 0x10) : l == 0);
+		CHECK("venc_fec: E on the last parity, detection bits kept",
+			!n || ((g_flags[n - 1] & 0x20) && (g_flags[n - 1] & 0xC7) == 0x01));
+	}
+	CHECK("venc_fec: a frame of 11 sources gets parity", emit_frame(11, 1000) > 0);
+	CHECK("venc_fec: a 1-source 10 B frame gets none", emit_frame(1, 10) == 0);
+	return failures;
+}
+
 int test_rs_fec(void)
 {
 	static uint8_t sym[26][2 + 40];
@@ -106,5 +172,6 @@ int test_rs_fec(void)
 				memcmp(out[j], g_cases[c].par[j], 2 + maxlen) == 0);
 	}
 	failures += test_rs_fec_long_symbols();
+	failures += test_venc_fec_last_parity();
 	return failures;
 }

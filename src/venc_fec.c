@@ -82,65 +82,77 @@ void venc_fec_capture(VencFec *fec, const uint8_t *header,
 /* Blocks of at most VENC_FEC_BLOCK_MAX sources; r per block from a byte
  * credit worth 1/VENC_FEC_PARITY_DIV of the source datagrams, so a small
  * block may get none and small frames share protection instead of
- * overspending. */
+ * overspending.  Every block's r first, so the frame's last parity datagram
+ * can carry L (0x10 in byte 13): no more parity for this frame, and a
+ * receiver gives up the frame's gaps at it instead of at the next frame. */
 void venc_fec_emit(VencFec *fec, RtpPacketizerWriteFn write, void *opaque)
 {
+	enum { NB_MAX = (VENC_FEC_MAX_SRC + VENC_FEC_BLOCK_MAX - 1) /
+		VENC_FEC_BLOCK_MAX };
 	const unsigned total = fec->count;
 	const unsigned nb = (total + VENC_FEC_BLOCK_MAX - 1) / VENC_FEC_BLOCK_MAX;
 	uint8_t *const par = fec->arena + ARENA_SRC_BYTES;
-	unsigned b, i, first = 0;
+	unsigned k[NB_MAX], r[NB_MAX], b, i, first = 0, last = nb;
+	size_t maxlen[NB_MAX];
 
-	for (b = 0; b < nb; b++) {
-		const unsigned k = total / nb + (b < total % nb);
+	for (b = 0; b < nb; first += k[b], b++) {
 		const uint8_t *src = fec->arena +
 			(size_t)first * VENC_FEC_SYM_MAX;
-		size_t maxlen = 0, src_bytes = 0, plen;
-		unsigned r;
+		size_t src_bytes = 0, plen;
 
-		for (i = 0; i < k; i++) {
+		k[b] = total / nb + (b < total % nb);
+		maxlen[b] = 0;
+		for (i = 0; i < k[b]; i++) {
 			const size_t len = read_be16(src +
 				(size_t)i * VENC_FEC_SYM_MAX);
 
-			if (len > maxlen)
-				maxlen = len;
+			if (len > maxlen[b])
+				maxlen[b] = len;
 			src_bytes += RTP_HEADER_BYTES + len;
 		}
-		plen = RTP_HEADER_BYTES + VENC_FEC_HDR + 2 + maxlen;
+		plen = RTP_HEADER_BYTES + VENC_FEC_HDR + 2 + maxlen[b];
 		fec->credit += (int64_t)src_bytes;
-		r = (unsigned)(fec->credit /
+		r[b] = (unsigned)(fec->credit /
 			(int64_t)(VENC_FEC_PARITY_DIV * plen));
-		if (r > k) /* more is near-copies; also keeps k + idx <= 255 */
-			r = k;
-		fec->credit -= (int64_t)(r * VENC_FEC_PARITY_DIV * plen);
-		if (!r)
-			__atomic_fetch_add(&fec->unprotected, k,
+		if (r[b] > k[b]) /* more is near-copies; also keeps k + idx <= 255 */
+			r[b] = k[b];
+		fec->credit -= (int64_t)(r[b] * VENC_FEC_PARITY_DIV * plen);
+		if (!r[b])
+			__atomic_fetch_add(&fec->unprotected, k[b],
 				__ATOMIC_RELAXED);
+		else
+			last = b;
+	}
+	for (b = 0, first = 0; b < nb; first += k[b], b++) {
+		const uint8_t *src = fec->arena +
+			(size_t)first * VENC_FEC_SYM_MAX;
+
+		if (!r[b])
+			continue;
 		/* Zero-pad to this block's longest only, not the 3780 cap. */
-		for (i = 0; r && i < k; i++) {
+		for (i = 0; i < k[b]; i++) {
 			uint8_t *s = fec->arena +
 				(size_t)(first + i) * VENC_FEC_SYM_MAX;
 			const size_t len = read_be16(s);
 
-			memset(s + 2 + len, 0, maxlen - len);
+			memset(s + 2 + len, 0, maxlen[b] - len);
 		}
-
-		if (r)
-			rs_fec_encode(k, r, src, VENC_FEC_SYM_MAX, 2 + maxlen,
-				par + VENC_FEC_HDR, PAR_ROW);
-		for (i = 0; i < r; i++) {
+		rs_fec_encode(k[b], r[b], src, VENC_FEC_SYM_MAX, 2 + maxlen[b],
+			par + VENC_FEC_HDR, PAR_ROW);
+		for (i = 0; i < r[b]; i++) {
 			uint8_t *row = par + (size_t)i * PAR_ROW;
 
 			row[0] = 0x7E; /* H.265 NAL type 63: decoders ignore it */
 			row[1] = (uint8_t)((b == nb - 1 && fec->frame == 1 ?
-				0x20 : 0) | 0x01);
-			row[2] = (uint8_t)k;
+				0x20 : 0) | (b == last && i == r[b] - 1 ? 0x10 : 0) |
+				0x01);
+			row[2] = (uint8_t)k[b];
 			row[3] = (uint8_t)i;
 			write_be16(row + 4, (uint16_t)(fec->base_seq + first));
 			(void)rtp_packetizer_send_packet(&fec->rtp, write,
-				opaque, row, VENC_FEC_HDR + 2 + maxlen,
+				opaque, row, VENC_FEC_HDR + 2 + maxlen[b],
 				NULL, 0, 0);
 		}
-		first += k;
 	}
 }
 
