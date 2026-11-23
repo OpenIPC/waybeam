@@ -1,5 +1,19 @@
 # History
 
+## [0.90.3] - 2026-11-23
+
+CV610's init script raises `net.unix.max_dgram_qlen` to 256 before venc
+starts, as `S95waybeam` already does.
+
+- **Symptom:** with a `unix://` output, venc read the kernel default of 10 at
+  start and cached it. A frame's own datagrams then read as a 75–92 % full
+  queue: `inPressure` was set on about a third of frames and `pressureDrops`
+  climbed at 26–50/s, with no transport drops.
+- **Why the estimate was wrong:** the consumer's queue was already 256 deep,
+  because its own init raised the sysctl before creating its socket. Only
+  venc's capacity estimate was wrong: it assumed a 10-datagram queue.
+- **Scope:** `init.d/S95waybeam.cv610` only, with no C and no API change.
+
 ## [0.90.2] - 2026-11-23
 
 The frame's last FEC parity datagram says so, so a ground closes a failed
