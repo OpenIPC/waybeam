@@ -88,7 +88,8 @@ void sensor_list_modes(int forced_pad, int selected_pad, int selected_mode);
 /* Build a JSON string describing all available sensor modes.
  * Caller must free() the returned string.  Returns NULL on failure.
  * selected_pad/selected_mode: mark the currently active mode (-1 = none). */
-char *sensor_modes_json(int forced_pad, int selected_pad, int selected_mode);
+char *sensor_modes_json(int forced_pad, int selected_pad, int selected_mode,
+	uint32_t encode_width, uint32_t encode_height);
 
 /* ── Scoring helpers (exposed for unit testing) ──────────────────────── */
 

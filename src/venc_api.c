@@ -232,6 +232,16 @@ void venc_api_set_sensor_info(int pad, int mode_index, int forced_pad)
 	pthread_mutex_unlock(&g_cfg_mutex);
 }
 
+static uint32_t g_encode_width, g_encode_height;
+
+void venc_api_set_encode_size(uint32_t width, uint32_t height)
+{
+	pthread_mutex_lock(&g_cfg_mutex);
+	g_encode_width = width;
+	g_encode_height = height;
+	pthread_mutex_unlock(&g_cfg_mutex);
+}
+
 /* ── Reinit flag (shared with backend via accessors) ─────────────────── */
 
 static volatile sig_atomic_t g_reinit = 0;
@@ -4432,6 +4442,7 @@ static int handle_modes(int fd, const HttpRequest *req, void *ctx)
 	size_t count = sensor->mode_count;
 	size_t i;
 	int selected, selected_pad;
+	uint32_t enc_w, enc_h;
 	cJSON *root, *data, *pads, *pad, *arr;
 	char *str;
 	int rc;
@@ -4444,6 +4455,8 @@ static int handle_modes(int fd, const HttpRequest *req, void *ctx)
 	pthread_mutex_lock(&g_cfg_mutex);
 	selected = g_sensor_mode;
 	selected_pad = g_sensor_pad;
+	enc_w = g_encode_width;
+	enc_h = g_encode_height;
 	pthread_mutex_unlock(&g_cfg_mutex);
 
 	root = cJSON_CreateObject();
@@ -4453,6 +4466,8 @@ static int handle_modes(int fd, const HttpRequest *req, void *ctx)
 	data = cJSON_AddObjectToObject(root, "data");
 	cJSON_AddNumberToObject(data, "selected_pad", selected_pad);
 	cJSON_AddNumberToObject(data, "selected_mode", selected);
+	cJSON_AddNumberToObject(data, "encode_width", enc_w);
+	cJSON_AddNumberToObject(data, "encode_height", enc_h);
 	pads = cJSON_AddArrayToObject(data, "pads");
 	pad = cJSON_CreateObject();
 	cJSON_AddItemToArray(pads, pad);
@@ -4480,8 +4495,9 @@ static int handle_modes(int fd, const HttpRequest *req, void *ctx)
 #else
 	pthread_mutex_lock(&g_cfg_mutex);
 	int pad = g_sensor_pad, mode = g_sensor_mode, forced = g_sensor_forced_pad;
+	uint32_t enc_w = g_encode_width, enc_h = g_encode_height;
 	pthread_mutex_unlock(&g_cfg_mutex);
-	char *json = sensor_modes_json(forced, pad, mode);
+	char *json = sensor_modes_json(forced, pad, mode, enc_w, enc_h);
 	if (!json)
 		return httpd_send_error(fd, 500, "modes_failed", "Failed to query sensor modes");
 	int rc = httpd_send_json(fd, 200, json);

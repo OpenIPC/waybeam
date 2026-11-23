@@ -2798,6 +2798,7 @@ int star6e_pipeline_start(Star6ePipelineState *state, const VencConfig *vcfg,
 		vcfg, &state->venc_channel);
 	if (ret != 0)
 		goto fail_vpe;
+	venc_api_set_encode_size(pconf.image_width, pconf.image_height);
 
 	/* IntraRefresh — opt-in via video0.intra_refresh.  Failure is logged
 	 * but not fatal: stream still works without rolling refresh. */
