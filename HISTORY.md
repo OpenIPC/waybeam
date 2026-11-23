@@ -1,5 +1,25 @@
 # History
 
+## [0.90.2] - 2026-11-23
+
+The frame's last FEC parity datagram says so, so a ground closes a failed
+block at once.
+
+- **L, `0x10` in parity byte 13** (`protocols/venc-fec.md`, a reserved bit
+  until now), is set on exactly one datagram per frame with parity: the last
+  one sent. A frame without parity has none.
+- **Why:** nearly every frame is one block (on the SSC338Q bench about 11
+  sources per frame, 40 per block). So nearly every unrecoverable block was
+  the frame's last, and a receiver could only give it up at the next frame's
+  first datagram, about a frame interval later. With L it gives up at once.
+- **Compatible:** receivers mask byte 13 with `0xC7`, and the parity bytes,
+  RTP marker, version and vectors are unchanged. To a plain `rtph265depay`
+  it is still a type-63 NAL that decoders ignore; L sets a `nuh_layer_id`
+  bit, a non-base layer.
+- **`venc_fec_emit`** now works out every block's `r` (the same credit
+  arithmetic) before it sends, so it knows which datagram is last. Star6E,
+  Maruko and CV610 share it.
+
 ## [0.90.1] - 2026-11-22
 
 `/api/v1/modes` reports the size the encoder runs at.
