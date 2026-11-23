@@ -82,7 +82,7 @@ static int test_rs_fec_long_symbols(void)
 
 /* L (protocols/venc-fec.md byte 13, 0x10): exactly one per frame with
  * parity, on the last parity datagram sent; E on the last block's parity. */
-static uint8_t g_flags[64];
+static uint8_t g_flags[512]; /* r <= k and k <= 256 sources a frame */
 static unsigned g_nflags;
 
 static int keep_flags(const uint8_t *header, size_t header_len,
@@ -96,52 +96,61 @@ static int keep_flags(const uint8_t *header, size_t header_len,
 	return 0;
 }
 
-static unsigned emit_frame(unsigned sources, size_t len)
+/* One frame through capture and emit on `fec` (its credit carries over):
+ * `sources` packets of `len` bytes, packet `big` (if < sources) oversize,
+ * which ends capture for the frame (frame = 2). */
+static unsigned emit_frame(VencFec *fec, unsigned sources, size_t len, unsigned big)
 {
-	static uint8_t payload[1400];
-	VencFec fec;
+	static uint8_t payload[VENC_FEC_MAX_PAYLOAD_BYTES + 1];
 	uint8_t hdr[12] = { 0x80, 96 };
 	unsigned i;
 
-	memset(&fec, 0, sizeof(fec));
 	memset(payload, 0x5A, sizeof(payload));
 	g_nflags = 0;
-	if (venc_fec_set(&fec, 1) != 0)
-		return 0;
-	venc_fec_begin_frame(&fec);
+	venc_fec_begin_frame(fec);
 	for (i = 0; i < sources; i++) {
 		hdr[2] = (uint8_t)(i >> 8);
 		hdr[3] = (uint8_t)i;
-		venc_fec_capture(&fec, hdr, payload, len, NULL, 0);
+		venc_fec_capture(fec, hdr, payload,
+			i == big ? sizeof(payload) : len, NULL, 0);
 	}
-	venc_fec_emit(&fec, keep_flags, NULL);
-	venc_fec_free(&fec);
+	venc_fec_emit(fec, keep_flags, NULL);
 	return g_nflags;
 }
 
 static int test_venc_fec_last_parity(void)
 {
-	static const struct { unsigned sources; size_t len; } frames[] = {
-		{ 11, 1000 }, /* one block, as most frames on .232 */
-		{ 100, 1200 }, /* three blocks */
-		{ 1, 10 },     /* too small for any parity */
-	};
+	VencFec fec;
+	uint32_t x = 12345;
+	unsigned f, bad_l = 0, bad_bits = 0, with = 0, multi = 0;
 	int failures = 0;
-	size_t f;
 
-	for (f = 0; f < sizeof(frames) / sizeof(frames[0]); f++) {
-		const unsigned n = emit_frame(frames[f].sources, frames[f].len);
-		unsigned i, l = 0;
+	memset(&fec, 0, sizeof(fec));
+	if (venc_fec_set(&fec, 1) != 0)
+		return 1;
+	/* Varied frames, credit carried: small ones without parity, multi-block
+	 * ones, over 256 sources, a last block at r = 0, capture ended early. */
+	for (f = 0; f < 2000; f++) {
+		unsigned n, i, l = 0, sources;
+		size_t len;
 
-		for (i = 0; i < n; i++)
+		x = x * 1103515245u + 12345u;
+		sources = 1 + (x >> 8) % 300;
+		len = 1 + (x >> 4) % 1400;
+		n = emit_frame(&fec, sources, len, (x & 7) == 0 ? (x >> 16) % sources : sources);
+		for (i = 0; i < n; i++) {
 			l += (g_flags[i] & 0x10) != 0;
-		CHECK("venc_fec: L on exactly one datagram of a frame with parity",
-			n ? l == 1 && (g_flags[n - 1] & 0x10) : l == 0);
-		CHECK("venc_fec: E on the last parity, detection bits kept",
-			!n || ((g_flags[n - 1] & 0x20) && (g_flags[n - 1] & 0xC7) == 0x01));
+			bad_bits += (g_flags[i] & 0xC7) != 0x01;
+		}
+		bad_l += n ? !(l == 1 && (g_flags[n - 1] & 0x10)) : l != 0;
+		with += n > 0;
+		multi += sources > VENC_FEC_BLOCK_MAX && n > 0;
 	}
-	CHECK("venc_fec: a frame of 11 sources gets parity", emit_frame(11, 1000) > 0);
-	CHECK("venc_fec: a 1-source 10 B frame gets none", emit_frame(1, 10) == 0);
+	venc_fec_free(&fec);
+	CHECK("venc_fec: L on exactly the last parity datagram of each frame", bad_l == 0);
+	CHECK("venc_fec: detection bits kept with L", bad_bits == 0);
+	CHECK("venc_fec: the run covered frames with and without parity", with > 100 && with < 2000);
+	CHECK("venc_fec: the run covered multi-block frames", multi > 100);
 	return failures;
 }
 

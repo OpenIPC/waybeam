@@ -396,7 +396,7 @@ curl http://<device-ip>:<port>/api/v1/version
 ```
 
 ```json
-{"ok":true,"data":{"app_version":"0.90.0","backend":"star6e","contract_version":"0.36.1","config_schema_version":"1.0.0"}}
+{"ok":true,"data":{"app_version":"0.90.2","backend":"star6e","contract_version":"0.36.1","config_schema_version":"1.0.0"}}
 ```
 
 #### GET /api/v1/config
