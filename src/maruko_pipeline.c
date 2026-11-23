@@ -2568,6 +2568,7 @@ static int bind_maruko_pipeline(MarukoBackendContext *ctx)
 	    &ctx->venc_dev_created) != 0)
 		return -1;
 	ctx->venc_started = 1;
+	venc_api_set_encode_size(out_w, out_h);
 
 	maruko_update_output_resilience_flags(ctx);
 
