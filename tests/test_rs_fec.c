@@ -82,31 +82,34 @@ static int test_rs_fec_long_symbols(void)
 
 /* L (protocols/venc-fec.md byte 13, 0x10): exactly one per frame with
  * parity, on the last parity datagram sent; E on the last block's parity. */
-static uint8_t g_flags[512]; /* r <= k and k <= 256 sources a frame */
-static unsigned g_nflags;
+typedef struct {
+	uint8_t flags[512]; /* r <= k and k <= 256 sources a frame */
+	unsigned n;
+} FlagLog;
 
 static int keep_flags(const uint8_t *header, size_t header_len,
 	const uint8_t *payload1, size_t payload1_len,
 	const uint8_t *payload2, size_t payload2_len, void *opaque)
 {
 	(void)header; (void)header_len; (void)payload1_len;
-	(void)payload2; (void)payload2_len; (void)opaque;
-	if (g_nflags < sizeof(g_flags))
-		g_flags[g_nflags++] = payload1[1];
+	(void)payload2; (void)payload2_len;
+	FlagLog *fl = opaque;
+	if (fl->n < sizeof(fl->flags))
+		fl->flags[fl->n++] = payload1[1];
 	return 0;
 }
 
 /* One frame through capture and emit on `fec` (its credit carries over):
  * `sources` packets of `len` bytes, packet `big` (if < sources) oversize,
  * which ends capture for the frame (frame = 2). */
-static unsigned emit_frame(VencFec *fec, unsigned sources, size_t len, unsigned big)
+static unsigned emit_frame(VencFec *fec, FlagLog *fl, unsigned sources, size_t len, unsigned big)
 {
 	static uint8_t payload[VENC_FEC_MAX_PAYLOAD_BYTES + 1];
 	uint8_t hdr[12] = { 0x80, 96 };
 	unsigned i;
 
 	memset(payload, 0x5A, sizeof(payload));
-	g_nflags = 0;
+	fl->n = 0;
 	venc_fec_begin_frame(fec);
 	for (i = 0; i < sources; i++) {
 		hdr[2] = (uint8_t)(i >> 8);
@@ -114,13 +117,14 @@ static unsigned emit_frame(VencFec *fec, unsigned sources, size_t len, unsigned 
 		venc_fec_capture(fec, hdr, payload,
 			i == big ? sizeof(payload) : len, NULL, 0);
 	}
-	venc_fec_emit(fec, keep_flags, NULL);
-	return g_nflags;
+	venc_fec_emit(fec, keep_flags, fl);
+	return fl->n;
 }
 
 static int test_venc_fec_last_parity(void)
 {
 	VencFec fec;
+	FlagLog fl;
 	uint32_t x = 12345;
 	unsigned f, bad_l = 0, bad_bits = 0, with = 0, multi = 0;
 	int failures = 0;
@@ -137,12 +141,12 @@ static int test_venc_fec_last_parity(void)
 		x = x * 1103515245u + 12345u;
 		sources = 1 + (x >> 8) % 300;
 		len = 1 + (x >> 4) % 1400;
-		n = emit_frame(&fec, sources, len, (x & 7) == 0 ? (x >> 16) % sources : sources);
+		n = emit_frame(&fec, &fl, sources, len, (x & 7) == 0 ? (x >> 16) % sources : sources);
 		for (i = 0; i < n; i++) {
-			l += (g_flags[i] & 0x10) != 0;
-			bad_bits += (g_flags[i] & 0xC7) != 0x01;
+			l += (fl.flags[i] & 0x10) != 0;
+			bad_bits += (fl.flags[i] & 0xC7) != 0x01;
 		}
-		bad_l += n ? !(l == 1 && (g_flags[n - 1] & 0x10)) : l != 0;
+		bad_l += n ? !(l == 1 && (fl.flags[n - 1] & 0x10)) : l != 0;
 		with += n > 0;
 		multi += sources > VENC_FEC_BLOCK_MAX && n > 0;
 	}
