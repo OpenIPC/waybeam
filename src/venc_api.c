@@ -1111,9 +1111,12 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 	 * advertises it.  (Which also means mode_default_qp()'s per-mode stripe
 	 * QP is inert on the SigmaStar parts.) */
 	if (backend_name && strcmp(backend_name, "cv610") != 0 &&
-	    (strcmp(canonical_key, "video0.intra_refresh_qp") == 0 ||
-	     /* Early slice output is a CV610 SDK feature (is_by_frame). */
-	     strcmp(canonical_key, "video0.low_latency") == 0))
+	    strcmp(canonical_key, "video0.intra_refresh_qp") == 0)
+		return 0;
+	/* Early slice output and VPSS low delay are CV610 SDK features; the
+	 * SigmaStar backends have no reader for video0.low_latency. */
+	if (backend_name && strcmp(backend_name, "cv610") != 0 &&
+	    strcmp(canonical_key, "video0.low_latency") == 0)
 		return 0;
 
 	/* These controls have no Maruko implementation.  Keep them in the shared

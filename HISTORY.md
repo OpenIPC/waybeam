@@ -20,8 +20,11 @@ CV610 low-latency mode: `video0.lowLatency` (restart-only, default off).
   or `unix://` server, or with SVC-T. Star6E and Maruko report it
   unsupported.
 - **`/api/v1/transport/status` gains `frameEndLatencyUs` and
-  `frameEndLatencyMaxUs`** on CV610 socket transports: capture to the
-  frame's last slice, mean and max per second, with or without the mode.
+  `frameEndLatencyMaxUs`** on CV610: capture to the frame's last slice,
+  mean and max per second, with or without the mode.
+- **Sidecar:** the RTP seq/timestamp snapshot is taken when a frame opens
+  (its first `get_stream`) in both modes; `frame_ready_us` stays the
+  encode-complete time.
 - `cv610_send_rtp_frame()` is split into begin / per-NAL / end, shared by
   both output paths. `cv610_copy_stream()` appends, so a low-latency frame's
   slices collect into one access unit for the recorder, the sidecar and the

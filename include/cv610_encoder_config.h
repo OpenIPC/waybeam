@@ -40,8 +40,7 @@ typedef struct {
 	uint32_t expected_count;
 	/* video0.low_latency: slices leave the encoder as they finish
 	 * (is_by_frame off, slice_output_en on), and VPSS releases rows to it
-	 * after low_delay_lines -- one slice height, the value measured clean
-	 * at 720p100 (128) and 1080p60 (192).  0 lines = low delay off. */
+	 * after low_delay_lines, one slice height (0 = off). */
 	uint32_t early_output;
 	uint32_t low_delay_lines;
 } Cv610SliceConfig;

@@ -72,13 +72,15 @@ const char *cv610_validate_config(const VencConfig *cfg)
 	/* Low latency hands each slice to RTP as it is encoded: it needs slices,
 	 * a socket transport to send them on, and whole-frame-free output --
 	 * SVC-T's trail_r -> n rewrite patches the finished frame. */
-	if (cfg->video0.low_latency && cfg->video0.slice_count < 2)
-		return "CV610 video0.low_latency requires video0.slice_count >= 2";
-	if (cfg->video0.low_latency && cfg->video0.ref_base > 0)
-		return "CV610 video0.low_latency cannot be combined with SVC-T "
-			"(a resilience preset with refBase)";
-	if (cfg->video0.low_latency && !cfg->outgoing.enabled)
-		return "CV610 video0.low_latency requires outgoing output";
+	if (cfg->video0.low_latency) {
+		if (cfg->video0.slice_count < 2)
+			return "CV610 video0.low_latency requires video0.slice_count >= 2";
+		if (cfg->video0.ref_base > 0)
+			return "CV610 video0.low_latency cannot be combined with SVC-T "
+				"(a resilience preset with refBase)";
+		if (!cfg->outgoing.enabled)
+			return "CV610 video0.low_latency requires outgoing output";
+	}
 	if (!cfg->outgoing.enabled)
 		return NULL;
 	if (strcmp(cfg->outgoing.stream_mode, "rtp") != 0)

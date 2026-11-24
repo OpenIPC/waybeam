@@ -1694,7 +1694,7 @@ Field reference:
 | `fecParityPkts` | (`udp`/`unix` only) Lifetime RS parity datagrams that reached the socket (`outgoing.fec`); included in `packetsSent`. No parity is built for a frame whose video flush already gave up, so a parity drop in `transportDrops` means the socket refused parity after the video went out |
 | `fecUnprotected` | (`udp`/`unix` only) Lifetime source packets sent with no parity: blocks whose 25 % byte credit bought none (small frames share protection) packets past the 256-per-frame cap (the first 256 stay protected), or frames that went out whole after the 4 ms flush budget ran out (no parity is built then). Packets the socket refused are `transportDrops`, never counted here |
 | `rtpPayload` | (`udp`/`unix` only) RTP payload size of the last video frame. `outgoing.maxPayloadSize` with `outgoing.fec` off; with it on, venc derives it: 3/2 of the smoothed mean non-IRAP slice, between 1400 (or a lower `maxPayloadSize`) and `maxPayloadSize`. Raise `maxPayloadSize` to the link's limit (at most 3780) to let it grow |
-| `frameEndLatencyUs` / `frameEndLatencyMaxUs` | (CV610, `udp`/`unix` only) Capture to the frame's last encoded slice, in µs: mean and max over the last second of frames (`0` until the first second closes). Capture time is the encoder's PTS on the monotonic clock. With `video0.low_latency` the frame's earlier slices are already on the wire by then |
+| `frameEndLatencyUs` / `frameEndLatencyMaxUs` | (CV610 only) Capture to the frame's last encoded slice, in µs: mean and max over the last second of frames (`0` until the first second closes). Capture time is the encoder's PTS on the monotonic clock. With `video0.low_latency` the frame's earlier slices are already on the wire by then |
 | `framesSent` | (`frame-shm` only) Lifetime whole frames written into the ring.  The `frame-shm` counterpart of `packetsSent`: this transport carries one access unit per slot, not packets |
 | `oversizeDrops` | (SHM only) Frames rejected for exceeding slot capacity |
 | `slotCount` / `usedSlots` | (SHM only) Ring sizing; `usedSlots` is a snapshot |
@@ -2072,9 +2072,8 @@ in Notes. As of `contract_version: 0.29.0`:
 - `0.37.0` (additive; from venc 0.91.0): `video0.low_latency` /
   `video0.lowLatency` (CV610 only, restart-only): early per-slice output,
   VPSS low delay at one slice height and per-slice RTP send. Star6E and
-  Maruko report it unsupported. CV610's `GET /api/v1/transport/status` on
-  `udp://` and `unix://` gains `frameEndLatencyUs` and
-  `frameEndLatencyMaxUs`.
+  Maruko report it unsupported. CV610's `GET /api/v1/transport/status`
+  gains `frameEndLatencyUs` and `frameEndLatencyMaxUs` on every transport.
 - `0.36.1` (patch; from venc 0.89.1): CV610 accepts `outgoing.audioPort=0`
   with a `unix://` video server and sends audio to that socket, as Star6E
   and Maruko do. Before, the config was refused. `frame-shm://` with

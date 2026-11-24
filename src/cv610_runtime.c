@@ -178,22 +178,17 @@ typedef struct {
 		uint32_t slices;
 		uint32_t slice_bytes;
 		uint16_t max_payload;
-		int nal_count;
 		int status;
 	} txf;
-	/* video0.low_latency: each get_stream result is one slice, sent as it
-	 * arrives.  au collects the access unit for the per-frame work (IDR,
-	 * census, sidecar, recorder); au_open = its first slice is in and its
-	 * last is not.  The au_* sidecar values are taken at the first slice,
-	 * before the packetizer advances seq and timestamp. */
+	/* RTP timestamp and seq when the current frame opened
+	 * (cv610_frame_open), before any of its packets: the sidecar's. */
+	uint32_t frame_rtp_ts;
+	uint16_t frame_seq_before;
+	/* video0.low_latency: one slice per get_stream, sent as it arrives;
+	 * au collects the access unit (NULL between frames). */
 	int early_output;
 	uint8_t *au;
 	size_t au_len;
-	int au_open;
-	int au_sending;
-	uint32_t au_rtp_ts;
-	uint16_t au_seq_before;
-	uint64_t au_ready_us;
 	/* Capture -> frame end (us), accumulated per second on the encode loop
 	 * and published for /api/v1/transport/status. */
 	uint64_t fe_lat_sum_us;
@@ -1103,7 +1098,7 @@ static uint32_t cv610_query_live_fps(void)
 static char *cv610_query_transport_status(void)
 {
 	Cv610RunnerContext *ctx = g_cv610_runner;
-	char buf[640];
+	char buf[704];
 	int pos;
 	Cv610TransportSample ts;
 
@@ -1123,7 +1118,8 @@ static char *cv610_query_transport_status(void)
 			"\"transportDrops\":%llu,\"pressureDrops\":%u,"
 			"\"framesSent\":%llu,\"oversizeDrops\":%llu,"
 			"\"slotCount\":%u,\"usedSlots\":%u,"
-			"\"ringLowWaterSlots\":%u,\"otherDrops\":%llu%s}}",
+			"\"ringLowWaterSlots\":%u,\"otherDrops\":%llu,"
+			"\"frameEndLatencyUs\":%u,\"frameEndLatencyMaxUs\":%u%s}}",
 			(unsigned)ts.fill_pct,
 			ts.in_pressure ? "true" : "false",
 			(unsigned long long)ts.transport_drops,
@@ -1132,7 +1128,11 @@ static char *cv610_query_transport_status(void)
 			(unsigned long long)ts.oversize_drops,
 			(unsigned)ts.slot_count, (unsigned)ts.used_slots,
 			(unsigned)venc_ring_low_water_slots(&ctx->low_water),
-			(unsigned long long)ts.other_drops, gate_json);
+			(unsigned long long)ts.other_drops,
+			(unsigned)__atomic_load_n(&ctx->fe_lat_mean_pub,
+				__ATOMIC_RELAXED),
+			(unsigned)__atomic_load_n(&ctx->fe_lat_max_pub,
+				__ATOMIC_RELAXED), gate_json);
 	} else if (ts.active) {
 		pos = snprintf(buf, sizeof(buf),
 			"{\"ok\":true,\"data\":{"
@@ -1816,7 +1816,6 @@ static void cv610_rtp_send_nals(Cv610RunnerContext *ctx, const uint8_t *buf,
 		size_t sent;
 
 		nal_type = h26x_util_hevc_nalu_type(nal, nal_len);
-		ctx->txf.nal_count++;
 		(void)hevc_rtp_param_sets_before(&ctx->param_sets, nal_type,
 			nal, nal_len, &ctx->rtp, cv610_video_write, ctx,
 			ctx->txf.max_payload, &ctx->rtp_stats);
@@ -1829,7 +1828,7 @@ static void cv610_rtp_send_nals(Cv610RunnerContext *ctx, const uint8_t *buf,
 			 * loss gap, and never append later NALs to the incomplete AU. */
 			ctx->rtp.seq++;
 			ctx->txf.status = -1;
-			break;
+			continue;  /* the loop condition stops on status */
 		}
 		hevc_rtp_param_sets_sent(&ctx->param_sets, nal_type);
 		if (nal_type < 16) { /* non-IRAP slice: payload sizing */
@@ -1840,7 +1839,7 @@ static void cv610_rtp_send_nals(Cv610RunnerContext *ctx, const uint8_t *buf,
 }
 
 /* Close the access unit: parity, then the RTP clock step. */
-static int cv610_rtp_frame_end(Cv610RunnerContext *ctx, uint64_t pts)
+static void cv610_rtp_frame_end(Cv610RunnerContext *ctx, uint64_t pts)
 {
 	ctx->slice_avg = venc_fec_slice_avg(ctx->slice_avg, ctx->txf.slices,
 		ctx->txf.slice_bytes);
@@ -1875,15 +1874,14 @@ static int cv610_rtp_frame_end(Cv610RunnerContext *ctx, uint64_t pts)
 	else
 		ctx->rtp.timestamp += ctx->frame_ticks;
 	ctx->last_pts = pts;
-	return ctx->txf.nal_count > 0 ? ctx->txf.status : -1;
 }
 
-static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
+static void cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 	const uint8_t *frame, size_t len, uint64_t pts)
 {
 	cv610_rtp_frame_begin(ctx);
 	cv610_rtp_send_nals(ctx, frame, len, 1);
-	return cv610_rtp_frame_end(ctx, pts);
+	cv610_rtp_frame_end(ctx, pts);
 }
 
 /* Capture -> frame end, for /api/v1/transport/status: the mean and max of
@@ -1896,8 +1894,7 @@ static void cv610_note_frame_end_latency(Cv610RunnerContext *ctx, uint64_t pts)
 
 	if (capture_us == 0 || now_us < capture_us)
 		return;
-	lat = now_us - capture_us > UINT32_MAX ? UINT32_MAX
-		: (uint32_t)(now_us - capture_us);
+	lat = (uint32_t)(now_us - capture_us);
 	ctx->fe_lat_sum_us += lat;
 	if (lat > ctx->fe_lat_max_us)
 		ctx->fe_lat_max_us = lat;
@@ -1947,11 +1944,25 @@ static int cv610_copy_stream(const ot_venc_stream *stream, uint8_t **buf,
 	return 0;
 }
 
+/* Open a frame at its first get_stream, in both output modes: one seqlock
+ * read so every datagram of the access unit uses one destination and one
+ * enable state, and the sidecar's RTP snapshot before any packet of it. */
+static void cv610_frame_open(Cv610RunnerContext *ctx)
+{
+	cv610_transport_begin_frame(ctx);
+	ctx->frame_rtp_ts = ctx->rtp.timestamp;
+	ctx->frame_seq_before = ctx->rtp.seq;
+}
+
+static int cv610_tx_live(const Cv610RunnerContext *ctx)
+{
+	return ctx->tx.output_enabled && ctx->tx.socket_handle >= 0;
+}
+
 /* video0.low_latency: send this get_stream result (one slice) now and add it
  * to the access unit.  Returns 1 when it ended the frame -- *frame/*frame_len
- * then own the whole access unit -- 0 while the frame is still open, and -1
- * when nothing could be taken (the slice is skipped, as a whole frame is
- * today when its copy fails). */
+ * then own the whole access unit -- else 0.  A slice whose copy fails is
+ * skipped, as a whole frame is today. */
 static int cv610_early_slice(Cv610RunnerContext *ctx,
 	const ot_venc_stream *stream, uint8_t **frame, size_t *frame_len)
 {
@@ -1963,35 +1974,26 @@ static int cv610_early_slice(Cv610RunnerContext *ctx,
 	for (i = 0; i < stream->pack_cnt; ++i)
 		if (stream->pack[i].is_frame_end)
 			ends = 1;
-	if (!ctx->au_open) {
-		/* One seqlock read per frame, before its first datagram, so every
-		 * slice of this access unit uses one destination and one enable
-		 * state. */
-		cv610_transport_begin_frame(ctx);
-		ctx->au_rtp_ts = ctx->rtp.timestamp;
-		ctx->au_seq_before = ctx->rtp.seq;
-		ctx->au_ready_us = wb_monotonic_us();
-		ctx->au_sending = ctx->tx.output_enabled &&
-			ctx->tx.socket_handle >= 0;
-		if (ctx->au_sending)
+	if (!ctx->au) {
+		cv610_frame_open(ctx);
+		if (cv610_tx_live(ctx))
 			cv610_rtp_frame_begin(ctx);
-		ctx->au_open = 1;
 	}
 	if (cv610_copy_stream(stream, &ctx->au, &ctx->au_len) != 0)
-		return -1;
-	if (ctx->au_sending)
+		return 0;
+	if (ends)  /* stamped where whole-frame output stamps: before sending */
+		cv610_note_frame_end_latency(ctx, pts);
+	if (cv610_tx_live(ctx))
 		cv610_rtp_send_nals(ctx, ctx->au + start, ctx->au_len - start,
 			ends);
 	if (!ends)
 		return 0;
-	if (ctx->au_sending)
-		(void)cv610_rtp_frame_end(ctx, pts);
-	cv610_note_frame_end_latency(ctx, pts);
+	if (cv610_tx_live(ctx))
+		cv610_rtp_frame_end(ctx, pts);
 	*frame = ctx->au;
 	*frame_len = ctx->au_len;
 	ctx->au = NULL;
 	ctx->au_len = 0;
-	ctx->au_open = 0;
 	return 1;
 }
 
@@ -3000,6 +3002,7 @@ static int cv610_run(void *opaque)
 				&frame_len) == 1;
 		} else if (cv610_copy_stream(&stream, &frame, &frame_len) == 0) {
 			have_frame = 1;
+			cv610_frame_open(ctx);
 			cv610_note_frame_end_latency(ctx, stream.pack_cnt ?
 				(uint64_t)stream.pack[0].pts : 0);
 		}
@@ -3084,29 +3087,17 @@ static int cv610_run(void *opaque)
 			if (ctx->sidecar.fd > 0) {
 				if (rtp_sidecar_is_subscribed(&ctx->sidecar)) {
 					sc_send = 1;
-					/* Snapshot before the write: the packetizer
-					 * advances seq and timestamp as it sends.
-					 * Low latency sent the slices already, so
-					 * its snapshot is the first slice's. */
-					sc_rtp_ts = ctx->early_output
-						? ctx->au_rtp_ts : ctx->rtp.timestamp;
-					sc_seq_before = ctx->early_output
-						? ctx->au_seq_before : ctx->rtp.seq;
+					/* Taken when the frame opened, before the
+					 * packetizer advanced seq and timestamp. */
+					sc_rtp_ts = ctx->frame_rtp_ts;
+					sc_seq_before = ctx->frame_seq_before;
 					sc_capture_us = stream.pack_cnt
 						? cv610_capture_us_from_pts(ctx,
 							(uint64_t)stream.pack[0].pts)
 						: 0;
-					sc_ready_us = ctx->early_output
-						? ctx->au_ready_us : wb_monotonic_us();
+					sc_ready_us = wb_monotonic_us();
 				}
 			}
-
-			/* One seqlock read per frame, before either transport is
-			 * touched, so every datagram of this access unit uses
-			 * the same destination and one enable state.  Low
-			 * latency took it at the frame's first slice. */
-			if (!ctx->early_output)
-				cv610_transport_begin_frame(ctx);
 
 			/* GDR bookkeeping tracks the ENCODER's intra-refresh
 			 * phase, so it advances every frame regardless of whether
@@ -3152,11 +3143,11 @@ static int cv610_run(void *opaque)
 					&sc_fill) == 0)
 					sc_fillp = &sc_fill;
 				cv610_service_ring_low_water(ctx, sc_fillp);
-			} else if (!ctx->early_output && ctx->tx.output_enabled &&
-				ctx->tx.socket_handle >= 0) {
+			} else if (!ctx->early_output && cv610_tx_live(ctx)) {
 				/* cv610_output_write owns per-datagram drop accounting.
-				 * Low latency sent each slice as it arrived. */
-				(void)cv610_send_rtp_frame(ctx, frame, frame_len,
+				 * Low latency sent each slice as it arrived; this
+				 * path sends after the SVC-T trail_r -> n patch. */
+				cv610_send_rtp_frame(ctx, frame, frame_len,
 					stream.pack_cnt ?
 					(uint64_t)stream.pack[0].pts : 0);
 			}
