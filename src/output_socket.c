@@ -463,8 +463,8 @@ void output_socket_note_saturation(int socket_handle, OutputSocketQueue *queue)
 			printf(
 				"[output_socket] NOTE: unix:// peer queue holds ~%d "
 				"datagrams (%d B), under the net.unix.max_dgram_qlen of "
-				"%d venc read: the consumer's socket was created while "
-				"the sysctl was lower.\n",
+				"%d venc read: the consumer created its socket with a "
+				"smaller limit; fill is measured against its depth.\n",
 				dgrams, queued, qlen);
 		}
 	}
