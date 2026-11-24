@@ -184,11 +184,15 @@ typedef struct {
 	 * (cv610_frame_open), before any of its packets: the sidecar's. */
 	uint32_t frame_rtp_ts;
 	uint16_t frame_seq_before;
+	/* Encode-complete time of the current frame (cv610_note_frame_end),
+	 * taken before its last slice is sent: the sidecar's frame_ready_us. */
+	uint64_t frame_ready_us;
 	/* video0.low_latency: one slice per get_stream, sent as it arrives;
 	 * au collects the access unit (NULL between frames). */
 	int early_output;
 	uint8_t *au;
 	size_t au_len;
+	uint64_t au_pts;  /* every slice of a frame carries the same pts */
 	/* Capture -> frame end (us), accumulated per second on the encode loop
 	 * and published for /api/v1/transport/status. */
 	uint64_t fe_lat_sum_us;
@@ -1884,14 +1888,16 @@ static void cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 	cv610_rtp_frame_end(ctx, pts);
 }
 
-/* Capture -> frame end, for /api/v1/transport/status: the mean and max of
- * each second's frames, published as the second closes. */
-static void cv610_note_frame_end_latency(Cv610RunnerContext *ctx, uint64_t pts)
+/* The frame's last slice is encoded: latch the sidecar's ready time, and
+ * accumulate capture -> frame end for /api/v1/transport/status (the mean and
+ * max of each second's frames, published as the second closes). */
+static void cv610_note_frame_end(Cv610RunnerContext *ctx, uint64_t pts)
 {
 	const uint64_t capture_us = cv610_capture_us_from_pts(ctx, pts);
 	const uint64_t now_us = wb_monotonic_us();
 	uint32_t lat;
 
+	ctx->frame_ready_us = now_us;
 	if (capture_us == 0 || now_us < capture_us)
 		return;
 	lat = (uint32_t)(now_us - capture_us);
@@ -1960,9 +1966,9 @@ static int cv610_tx_live(const Cv610RunnerContext *ctx)
 }
 
 /* video0.low_latency: send this get_stream result (one slice) now and add it
- * to the access unit.  Returns 1 when it ended the frame -- *frame/*frame_len
- * then own the whole access unit -- else 0.  A slice whose copy fails is
- * skipped, as a whole frame is today. */
+ * to the access unit.  Returns 1 when it ended the frame -- *frame and
+ * *frame_len then own the whole access unit -- else 0.  A slice whose copy
+ * fails is skipped, as a whole frame is today. */
 static int cv610_early_slice(Cv610RunnerContext *ctx,
 	const ot_venc_stream *stream, uint8_t **frame, size_t *frame_len)
 {
@@ -1974,7 +1980,22 @@ static int cv610_early_slice(Cv610RunnerContext *ctx,
 	for (i = 0; i < stream->pack_cnt; ++i)
 		if (stream->pack[i].is_frame_end)
 			ends = 1;
+	if (ctx->au && pts != ctx->au_pts) {
+		/* The previous frame's last slice never arrived (a failed
+		 * get_stream or copy): close and drop it, so it does not merge
+		 * into this frame under one RTP timestamp.  The receiver sees
+		 * an AU without a marker, ended by the timestamp change. */
+		if (cv610_tx_live(ctx))
+			cv610_rtp_frame_end(ctx, ctx->au_pts);
+		fprintf(stderr, "[waybeam] CV610 low latency: frame pts=%llu "
+			"lost its last slice, %zu bytes dropped\n",
+			(unsigned long long)ctx->au_pts, ctx->au_len);
+		free(ctx->au);
+		ctx->au = NULL;
+		ctx->au_len = 0;
+	}
 	if (!ctx->au) {
+		ctx->au_pts = pts;
 		cv610_frame_open(ctx);
 		if (cv610_tx_live(ctx))
 			cv610_rtp_frame_begin(ctx);
@@ -1982,7 +2003,7 @@ static int cv610_early_slice(Cv610RunnerContext *ctx,
 	if (cv610_copy_stream(stream, &ctx->au, &ctx->au_len) != 0)
 		return 0;
 	if (ends)  /* stamped where whole-frame output stamps: before sending */
-		cv610_note_frame_end_latency(ctx, pts);
+		cv610_note_frame_end(ctx, pts);
 	if (cv610_tx_live(ctx))
 		cv610_rtp_send_nals(ctx, ctx->au + start, ctx->au_len - start,
 			ends);
@@ -3003,7 +3024,7 @@ static int cv610_run(void *opaque)
 		} else if (cv610_copy_stream(&stream, &frame, &frame_len) == 0) {
 			have_frame = 1;
 			cv610_frame_open(ctx);
-			cv610_note_frame_end_latency(ctx, stream.pack_cnt ?
+			cv610_note_frame_end(ctx, stream.pack_cnt ?
 				(uint64_t)stream.pack[0].pts : 0);
 		}
 		if (have_frame) {
@@ -3095,7 +3116,7 @@ static int cv610_run(void *opaque)
 						? cv610_capture_us_from_pts(ctx,
 							(uint64_t)stream.pack[0].pts)
 						: 0;
-					sc_ready_us = wb_monotonic_us();
+					sc_ready_us = ctx->frame_ready_us;
 				}
 			}
 

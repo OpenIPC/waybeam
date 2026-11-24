@@ -669,8 +669,9 @@ int main(void)
 	cfg.video0.ref_base = 2;
 	failures += expect_valid("cv610_reject_lowlat_svct", &cfg, 0);
 	cfg.video0.ref_base = 0;
+	/* outgoing.enabled is live: turning output off must not be refused. */
 	cfg.outgoing.enabled = false;
-	failures += expect_valid("cv610_reject_lowlat_no_output", &cfg, 0);
+	failures += expect_valid("cv610_accept_lowlat_output_off", &cfg, 1);
 	cfg.outgoing.enabled = true;
 	cfg.video0.low_latency = false;
 	cfg.video0.slice_count = 1;

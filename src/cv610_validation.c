@@ -78,8 +78,6 @@ const char *cv610_validate_config(const VencConfig *cfg)
 		if (cfg->video0.ref_base > 0)
 			return "CV610 video0.low_latency cannot be combined with SVC-T "
 				"(a resilience preset with refBase)";
-		if (!cfg->outgoing.enabled)
-			return "CV610 video0.low_latency requires outgoing output";
 	}
 	if (!cfg->outgoing.enabled)
 		return NULL;
