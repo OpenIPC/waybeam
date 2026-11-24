@@ -184,12 +184,15 @@ SOC_DEFS := -DPLATFORM_CV610 -DHAVE_BACKEND_CV610=1 \
 SOC_LDFLAGS := -Wl,--allow-shlib-undefined
 # The vendor libopus.so has no SONAME, so the binary must NEED "libopus.so".
 # Linked against a SONAME'd buildroot opus it NEEDs libopus.so.0 instead, and
-# fails to start on a camera that only has the vendor file.
+# fails to start on a camera that only has the vendor file.  Checked on the
+# binary, not the lib dir: with no libopus.so in CV610_SDK_LIB the linker
+# silently takes the toolchain sysroot's, which is SONAME'd too.
 SOC_POSTLINK = dyn=$$($(CV610_READELF) -d $@) || { rm -f $@; \
 		echo "ERROR: cannot check $@: $(CV610_READELF) failed" >&2; exit 1; }; \
 	case "$$dyn" in *'[libopus.so.0]'*) rm -f $@; \
 		echo "ERROR: $@ links libopus.so.0 -- CV610_SDK_LIB ($(CV610_SDK_LIB)) holds a" \
-			"buildroot opus; use the osdrv lib dir, see CV610_SDK_LIB in the Makefile" >&2; \
+			"buildroot opus or no libopus.so (the toolchain sysroot's is used then);" \
+			"use the osdrv lib dir, see CV610_SDK_LIB in the Makefile" >&2; \
 		exit 1;; esac
 SOC_LIBS := -lss_mpi -lss_mpi_isp -lss_mpi_ae -lss_mpi_awb \
 	-lot_mpi_isp -lss_mpi_sysmem -lss_mpi_sysbind \
@@ -309,7 +312,7 @@ $(OBJ_DIR)/%.o: %.c VERSION
 # COMMON_CFLAGS.
 $(TARGET): $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) $(if $(DRV),-L$(DRV),) $(if $(DRV_EXTRA),-L$(DRV_EXTRA),) $(if $(DRV),-Ltools,) $(BASE_LIBS) $(SOC_LIBS) -o $@
-	$(SOC_POSTLINK)
+	@$(SOC_POSTLINK)
 
 -include $(DEPS)
 
