@@ -91,6 +91,7 @@ typedef struct {
 	int          mirror;       /* image.mirror: sensor H reverse */
 	int          flip;         /* image.flip:   sensor V reverse */
 	const Cv610Sensor *sensor; /* plugin to load, id the ISP binds */
+	uint32_t     low_delay_lines; /* VPSS->VENC low delay; 0 = off */
 } Cv610PipelineRuntimeConfig;
 
 static volatile sig_atomic_t g_stop;
@@ -730,6 +731,24 @@ static int vpss_setup(const Cv610PipelineRuntimeConfig *c)
 	CV610_CHECK(ss_mpi_vpss_set_chn_attr(VPSS_GRP, VPSS_CHN, &chn_attr));
 	CV610_CHECK(ss_mpi_vpss_enable_chn(VPSS_GRP, VPSS_CHN));
 	CV610_CHECK(ss_mpi_vpss_start_grp(VPSS_GRP));
+	if (c->low_delay_lines > 0) {
+		ot_low_delay_info ld;
+
+		memset(&ld, 0, sizeof(ld));
+		ld.enable = TD_TRUE;
+		ld.line_cnt = c->low_delay_lines;
+		ld.one_buf_en = TD_FALSE;
+		CV610_CHECK(ss_mpi_vpss_set_chn_low_delay(VPSS_GRP, VPSS_CHN, &ld));
+		memset(&ld, 0, sizeof(ld));
+		CV610_CHECK(ss_mpi_vpss_get_chn_low_delay(VPSS_GRP, VPSS_CHN, &ld));
+		if (!ld.enable || ld.line_cnt != c->low_delay_lines) {
+			fprintf(stderr, "ERROR: VPSS low delay readback en=%u lines=%u, "
+				"wanted %u\n", (unsigned)ld.enable,
+				(unsigned)ld.line_cnt, (unsigned)c->low_delay_lines);
+			return -1;
+		}
+		printf("  ok  VPSS low delay %u lines\n", (unsigned)ld.line_cnt);
+	}
 
 	src.mod_id = OT_ID_VI;
 	src.dev_id = VI_PIPE;
@@ -820,6 +839,7 @@ int cv610_pipeline_start(const Cv610PipelineConfig *config)
 	c.mirror = config->mirror ? 1 : 0;
 	c.flip = config->flip ? 1 : 0;
 	c.sensor = config->sensor;
+	c.low_delay_lines = config->low_delay_lines;
 	g_stop = 0;
 
 	printf("== cv610 sys/vb ==\n");

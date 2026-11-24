@@ -172,6 +172,10 @@ typedef struct {
 	                            * >1 enables spatial loss concealment on the
 	                            * link RX (waybeam-link PROTOCOL.md §6.3b).
 	                            * Star6E, Maruko and CV610. */
+	bool low_latency;          /* CV610: early slice output + VPSS low delay
+	                            * at one slice height + per-slice RTP send.
+	                            * Needs slice_count > 1 and udp:// or unix://
+	                            * RTP.  Restart-only. */
 	/* Adaptive frame gate — stops draining the encoder's output FIFO while
 	 * the frame-shm egress ring is not draining.  There is no enable
 	 * switch: the gate arms itself on any frame-shm:// transport, and

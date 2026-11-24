@@ -25,7 +25,11 @@ large control surface.
   vendor readback; frame-SHM carries GDR/ENHANCE metadata and copied droppable
   NALs are marked TRAIL_N.
 - `video0.sliceCount` enables whole-access-unit H.265 slicing. CV610 uses
-  32-pixel LCU-row units and keeps early per-slice output disabled.
+  32-pixel LCU-row units.
+- `video0.lowLatency` (restart-only) turns on early per-slice output
+  (`is_by_frame` off, `slice_output_en`), VPSS low delay at one slice height,
+  and per-slice RTP send. Needs `sliceCount >= 2` and a `udp://`/`unix://`
+  server; refused with SVC-T. Frame end 15.5 → 9.4 ms at 720p100.
 - UDP and abstract UNIX outputs use the shared HEVC RTP packetizer.
 - `frame-shm://` publishes the VFRM v2 whole-frame contract (ring header
   version 2 since 0.69.0; consumers must be rebuilt to match).

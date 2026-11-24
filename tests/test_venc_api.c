@@ -521,6 +521,17 @@ static int test_field_support_by_backend(void)
 	CHECK("slice count supported cv610",
 		venc_api_field_supported_for_backend("cv610",
 			"video0.sliceCount") == 1);
+	/* Early slice output is a CV610 SDK feature; the SigmaStar backends
+	 * have no reader for it. */
+	CHECK("low latency supported cv610",
+		venc_api_field_supported_for_backend("cv610",
+			"video0.lowLatency") == 1);
+	CHECK("low latency unsupported star6e",
+		venc_api_field_supported_for_backend("star6e",
+			"video0.low_latency") == 0);
+	CHECK("low latency unsupported maruko",
+		venc_api_field_supported_for_backend("maruko",
+			"video0.lowLatency") == 0);
 	/* The adaptive frame gate is wired on CV610: cv610_runtime.c passes
 	 * both tunables to frame_gate_setup().  Greyed controls here while a
 	 * hand-edited config was honoured is the parity gap this guards. */

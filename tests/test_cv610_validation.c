@@ -495,6 +495,34 @@ static int test_encoder_config(void)
 	failures += expect("enc_portrait_slices_use_height",
 		enc.slice.total_lcu_rows == 60);
 
+	/* video0.low_latency: VPSS low delay is one slice height -- the values
+	 * measured clean on .142 are 128 lines at 720p100 and 192 at 1080p60. */
+	(void)venc_config_apply_resilience_preset("off", &cfg.video0);
+	cfg.video0.slice_count = 6;
+	cfg.video0.low_latency = true;
+	failures += expect("enc_lowlat_720_derive",
+		cv610_encoder_config_derive(&cfg, 1280, 720, 100, &enc) == 0);
+	failures += expect("enc_lowlat_720_one_slice_height",
+		enc.slice.early_output == 1 && enc.slice.split_size == 4 &&
+		enc.slice.low_delay_lines == 128);
+	failures += expect("enc_lowlat_1080_derive",
+		cv610_encoder_config_derive(&cfg, 1920, 1080, 60, &enc) == 0);
+	failures += expect("enc_lowlat_1080_one_slice_height",
+		enc.slice.early_output == 1 && enc.slice.split_size == 6 &&
+		enc.slice.low_delay_lines == 192);
+	cfg.video0.low_latency = false;
+	failures += expect("enc_lowlat_off_derive",
+		cv610_encoder_config_derive(&cfg, 1280, 720, 100, &enc) == 0);
+	failures += expect("enc_lowlat_off_no_early_no_delay",
+		enc.slice.early_output == 0 && enc.slice.low_delay_lines == 0);
+	cfg.video0.slice_count = 1;
+	cfg.video0.low_latency = true;
+	failures += expect("enc_lowlat_single_slice_derive",
+		cv610_encoder_config_derive(&cfg, 1280, 720, 100, &enc) == 0);
+	failures += expect("enc_lowlat_single_slice_inert",
+		enc.slice.early_output == 0 && enc.slice.low_delay_lines == 0);
+	cfg.video0.low_latency = false;
+
 	failures += expect("enc_reject_zero_width",
 		cv610_encoder_config_derive(&cfg, 0, 1080, 100, &enc) != 0);
 
@@ -628,6 +656,24 @@ int main(void)
 	cfg.video0.gop_size = 2000.0;
 	failures += expect_valid("cv610_reject_gop", &cfg, 0);
 	cfg.video0.gop_size = 3.0;
+	/* video0.low_latency needs slices, a socket transport and no SVC-T. */
+	cfg.video0.low_latency = true;
+	failures += expect_valid("cv610_reject_lowlat_one_slice", &cfg, 0);
+	cfg.video0.slice_count = 6;
+	failures += expect_valid("cv610_accept_lowlat_unix", &cfg, 1);
+	strcpy(cfg.outgoing.server, "udp://192.168.1.10:5600");
+	failures += expect_valid("cv610_accept_lowlat_udp", &cfg, 1);
+	strcpy(cfg.outgoing.server, "frame-shm://venc_frame_out");
+	failures += expect_valid("cv610_reject_lowlat_frame_shm", &cfg, 0);
+	strcpy(cfg.outgoing.server, "unix://venc_wfb");
+	cfg.video0.ref_base = 2;
+	failures += expect_valid("cv610_reject_lowlat_svct", &cfg, 0);
+	cfg.video0.ref_base = 0;
+	cfg.outgoing.enabled = false;
+	failures += expect_valid("cv610_reject_lowlat_no_output", &cfg, 0);
+	cfg.outgoing.enabled = true;
+	cfg.video0.low_latency = false;
+	cfg.video0.slice_count = 1;
 	cfg.audio.enabled = true;
 	strcpy(cfg.audio.codec, "opus");
 	cfg.audio.sample_rate = 48000;

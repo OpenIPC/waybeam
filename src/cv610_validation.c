@@ -69,6 +69,16 @@ const char *cv610_validate_config(const VencConfig *cfg)
 	if (cfg->outgoing.max_payload_size < VENC_OUTPUT_PAYLOAD_MIN_BYTES ||
 		cfg->outgoing.max_payload_size > VENC_OUTPUT_PAYLOAD_CEILING_BYTES)
 		return "outgoing.max_payload_size is outside the supported range";
+	/* Low latency hands each slice to RTP as it is encoded: it needs slices,
+	 * a socket transport to send them on, and whole-frame-free output --
+	 * SVC-T's trail_r -> n rewrite patches the finished frame. */
+	if (cfg->video0.low_latency && cfg->video0.slice_count < 2)
+		return "CV610 video0.low_latency requires video0.slice_count >= 2";
+	if (cfg->video0.low_latency && cfg->video0.ref_base > 0)
+		return "CV610 video0.low_latency cannot be combined with SVC-T "
+			"(a resilience preset with refBase)";
+	if (cfg->video0.low_latency && !cfg->outgoing.enabled)
+		return "CV610 video0.low_latency requires outgoing output";
 	if (!cfg->outgoing.enabled)
 		return NULL;
 	if (strcmp(cfg->outgoing.stream_mode, "rtp") != 0)
@@ -77,6 +87,9 @@ const char *cv610_validate_config(const VencConfig *cfg)
 		return "invalid outgoing.server URI";
 	if (uri.type == VENC_OUTPUT_URI_SHM)
 		return "CV610 phase one supports udp://, unix://, or frame-shm:// output";
+	if (cfg->video0.low_latency &&
+		uri.type != VENC_OUTPUT_URI_UDP && uri.type != VENC_OUTPUT_URI_UNIX)
+		return "CV610 video0.low_latency requires a udp:// or unix:// server";
 	/* Port 0 shares the video destination, so it needs a socket transport;
 	 * the same rule as cv610_audio_derive_output(). */
 	if (cfg->audio.enabled && cfg->outgoing.audio_port == 0 &&
