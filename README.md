@@ -396,7 +396,7 @@ curl http://<device-ip>:<port>/api/v1/version
 ```
 
 ```json
-{"ok":true,"data":{"app_version":"0.90.3","backend":"star6e","contract_version":"0.36.1","config_schema_version":"1.0.0"}}
+{"ok":true,"data":{"app_version":"0.90.4","backend":"star6e","contract_version":"0.36.1","config_schema_version":"1.0.0"}}
 ```
 
 #### GET /api/v1/config
@@ -1385,7 +1385,8 @@ a dedicated local UDP destination.
 >
 > `init.d/S95waybeam` does this at boot. venc warns on stderr at startup
 > when it finds a shallower value. Sends are additionally bounded by
-> `SO_SNDTIMEO` and a 4 ms per-frame flush deadline, so a wedged consumer
+> `SO_SNDTIMEO` and a 4 ms per-frame flush deadline (on CV610, the first
+> timed-out send drops the rest of the frame), so a wedged consumer
 > costs bounded packet drops (counted as `transportDrops` in
 > `GET /api/v1/transport/status`) instead of stalling the encoder.
 

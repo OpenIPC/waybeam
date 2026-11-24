@@ -1,5 +1,28 @@
 # History
 
+## [0.90.4] - 2026-11-24
+
+CV610 `unix://` output under a full consumer queue.
+
+- **The rest of the frame is dropped.** The first send that times out drops
+  the rest of the frame, as the contract says and as Star6E does. Before, each
+  packet waited its own 2 ms and was dropped alone, so a frame left full of
+  holes and the encoder was throttled as well. The rest of the frame is
+  counted and skipped without waiting, and it still spends its sequence
+  numbers, so a receiver's gap equals the loss.
+- **The RTP timestamp follows the encoder's PTS step** instead of a fixed step
+  per encoded frame. With `allowUnixEncoderStall` on, the SDK drops frames
+  while the consumer blocks. The RTP clock then still follows real time and
+  stays aligned with audio, however long the stall.
+- **The first timeout calibrates the queue-fill denominator** to the consumer's
+  real depth, as Star6E does. A consumer whose queue is shallower than the
+  sysctl (created before the init script raised it, or sized on purpose) then
+  reads 100 % when full instead of a fraction (#156). With
+  `allowUnixEncoderStall` on, a send first tries without waiting; a full queue
+  calibrates the same way, then the send blocks as before. So `fillPct` and
+  `inPressure` also show a stalled encoder. The NOTE that names a shallow
+  consumer goes to stdout.
+
 ## [0.90.3] - 2026-11-23
 
 CV610's init script raises `net.unix.max_dgram_qlen` to 256 before venc

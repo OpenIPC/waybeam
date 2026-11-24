@@ -8,6 +8,7 @@
 #include "test_helpers.h"
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stddef.h>
@@ -16,6 +17,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 typedef struct {
@@ -1529,6 +1531,52 @@ static int test_star6e_output_backpressure_hysteresis(void)
 	return failures;
 }
 
+/* The stall-mode send (CV610 with allowUnixEncoderStall): a BLOCKING unix
+ * socket tried with MSG_DONTWAIT refuses at once when the peer is full
+ * instead of waiting; that refusal is the calibration event (covered by the
+ * backpressure test below).  SO_SNDTIMEO makes a regression that drops the
+ * flag fail on the time check instead of hanging. */
+static int test_output_socket_dontwait_calibrates_a_blocking_socket(void)
+{
+	char name[64];
+	struct sockaddr_storage dst;
+	struct sockaddr_un *un = (struct sockaddr_un *)&dst;
+	struct timeval timeout = { .tv_sec = 1, .tv_usec = 0 };
+	uint8_t header[12] = { 0x80 }, payload[1400];
+	struct timespec t0, t1;
+	socklen_t dst_len;
+	int recv_fd, fd, sent = 0, ret = 0, err = 0, failures = 0;
+	long ms;
+
+	snprintf(name, sizeof(name), "test_unix_dontwait_%ld", (long)getpid());
+	recv_fd = create_unix_receiver(name);
+	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+	CHECK("dontwait sockets", recv_fd >= 0 && fd >= 0);
+	memset(&dst, 0, sizeof(dst));
+	un->sun_family = AF_UNIX;
+	memcpy(un->sun_path + 1, name, strlen(name));
+	dst_len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + strlen(name));
+	(void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+	memset(payload, 'X', sizeof(payload));
+	for (int i = 0; i < 4096; i++) {
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		ret = output_socket_send_parts_flags(fd, &dst, dst_len, 0,
+			header, sizeof(header), payload, sizeof(payload), NULL, 0,
+			MSG_DONTWAIT);
+		err = errno;
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+		if (ret != 0)
+			break;
+		sent++;
+	}
+	ms = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+	CHECK("dontwait filled the peer", sent > 0 && ret != 0 && err == EAGAIN);
+	CHECK("dontwait refused without waiting", ms < 100);
+	if (fd >= 0) close(fd);
+	if (recv_fd >= 0) close(recv_fd);
+	return failures;
+}
+
 /* UNIX datagram backpressure: with a receiver bound but not reading, the
  * sender's SIOCOUTQ rises until SO_SNDBUF caps it.  We send raw bytes
  * directly through output->socket_handle so the test doesn't depend on
@@ -2458,6 +2506,7 @@ int test_star6e_output(void)
 	failures += test_audio_target_cache_hit_stable();
 	failures += test_star6e_output_backpressure_hysteresis();
 	failures += test_star6e_output_unix_backpressure();
+	failures += test_output_socket_dontwait_calibrates_a_blocking_socket();
 	failures += test_star6e_output_unix_flush_is_bounded();
 	failures += test_star6e_output_unix_stall_mode_resumes_without_drops();
 	failures += test_star6e_output_always_sends_under_pressure();
