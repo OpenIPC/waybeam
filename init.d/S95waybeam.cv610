@@ -39,6 +39,19 @@ still_running()
 	pidof "$NAME" "$RESPAWN" "$WATCHDOG" >/dev/null 2>&1
 }
 
+# unix:// video output needs net.unix.max_dgram_qlen raised before venc and
+# any consumer start; the same function and rationale as init.d/S95waybeam.
+raise_unix_dgram_qlen()
+{
+	qlen_path=/proc/sys/net/unix/max_dgram_qlen
+	[ -w "$qlen_path" ] || return 0
+	cur=$(cat "$qlen_path" 2>/dev/null) || return 0
+	[ "$cur" -ge 256 ] 2>/dev/null && return 0
+	if echo 256 > "$qlen_path" 2>/dev/null; then
+		echo "venc: net.unix.max_dgram_qlen $cur -> 256 (unix:// output buffer)"
+	fi
+}
+
 start()
 {
 	if [ "$WAYBEAM_ENABLED" != "1" ]; then
@@ -60,6 +73,7 @@ start()
 	if [ -r "$PIDFILE" ]; then
 		rm -f "$PIDFILE"
 	fi
+	raise_unix_dgram_qlen
 	CV610_SENSOR_PROFILE="$CV610_SENSOR_PROFILE" \
 		CV610_MMZ_START="$CV610_MMZ_START" CV610_MMZ_SIZE="$CV610_MMZ_SIZE" \
 		CV610_AUDIO="$CV610_AUDIO" "$LOADER" start || return 1

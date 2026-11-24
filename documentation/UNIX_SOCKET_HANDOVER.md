@@ -76,10 +76,11 @@ flag, and no counter — only unexplained encoder timing jitter.
 
 **This is deliberate and is the key deployment fact.**
 
-`init.d/S95waybeam` raises `net.unix.max_dgram_qlen` to at least 256 in `start()`,
-before launching the daemon. It is a system-wide sysctl, applied by the init
-script that ships in this repo and installs to `/etc/init.d/S95waybeam` (see
-`scripts/star6e_direct_deploy.sh:11`).
+`init.d/S95waybeam` and `init.d/S95waybeam.cv610` raise `net.unix.max_dgram_qlen`
+to at least 256 in `start()`, before launching the daemon. It is a system-wide
+sysctl, applied by the init script that ships in this repo and installs to
+`/etc/init.d/S95waybeam` (see `scripts/star6e_direct_deploy.sh:11`; on CV610,
+`Makefile:405`).
 
 The `waybeam` binary **never writes the sysctl**. Two reasons:
 
