@@ -18,7 +18,7 @@
   - `read_only` — cannot be changed via API.
 
 ## Contract Version
-- `contract_version`: `0.36.1`
+- `contract_version`: `0.37.0`
 - `status`: `active`
 
 ## Per-Backend Field Support
@@ -109,8 +109,8 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.90.4",
-    "contract_version": "0.36.1",
+    "app_version": "0.91.0",
+    "contract_version": "0.37.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
   }
@@ -189,6 +189,7 @@ Response `200`:
       "video0.scene_threshold": { "mutability": "restart_required", "supported": true },
       "video0.scene_holdoff": { "mutability": "restart_required", "supported": true },
       "video0.slice_count": { "mutability": "restart_required", "supported": true },
+      "video0.low_latency": { "mutability": "restart_required", "supported": false },
       "video0.resilience": { "mutability": "restart_required", "supported": true },
       "video0.intra_refresh_qp": { "mutability": "restart_required", "supported": false },
       "video0.zoom_x": { "mutability": "live", "supported": true },
@@ -230,7 +231,21 @@ per picture; 1 disables splitting. Star6E, Maruko and CV610 advertise the
 field. The request is mapped to backend row geometry, so delivered counts may
 quantize or saturate; startup performs vendor Set/Get verification and fails
 an explicit multi-slice request when the backend cannot apply it. Slice NALs
-remain one whole access unit for RTP, recording and frame-SHM.
+remain one whole access unit for RTP, recording and frame-SHM, unless
+`video0.low_latency` is on.
+
+`video0.low_latency` / JSON `video0.lowLatency` (CV610 only, restart-only,
+default `false`) sends each slice's RTP packets as soon as the encoder
+finishes that slice, and lets VPSS release rows to the encoder after one slice
+height (32 px × LCU rows per slice: 128 lines at 720p with 6 slices, 192 at
+1080p) instead of after the whole frame. Packets on the wire are the same as
+whole-frame output (marker on the last NAL, one RTP timestamp per frame, FEC
+parity after the marker); only their timing moves. Measured on IMX662 with 6
+slices: frame end 15.5 → 9.4 ms at 720p100 and 27.2 → 15.2 ms at 1080p60. It
+requires `sliceCount >= 2`, a `udp://` or `unix://` server, and no SVC-T
+(a resilience preset with `refBase`); other configurations are refused with a
+message. Star6E and Maruko advertise it unsupported. Recording and the
+sidecar still see one whole access unit per frame.
 
 `data.routes` (added 0.18.4) reports which optional routes the running
 backend actually services, so a client does not have to call an expensive
@@ -1654,7 +1669,9 @@ Response `200` (UDP/Unix kernel-buffer fill_pct):
     "fecParityPkts": 0,
     "fecUnprotected": 0,
     "rtpPayload": 1400,
-    "badAuDrops": 0
+    "badAuDrops": 0,
+    "frameEndLatencyUs": 9380,
+    "frameEndLatencyMaxUs": 12740
   }
 }
 ```
@@ -1677,6 +1694,7 @@ Field reference:
 | `fecParityPkts` | (`udp`/`unix` only) Lifetime RS parity datagrams that reached the socket (`outgoing.fec`); included in `packetsSent`. No parity is built for a frame whose video flush already gave up, so a parity drop in `transportDrops` means the socket refused parity after the video went out |
 | `fecUnprotected` | (`udp`/`unix` only) Lifetime source packets sent with no parity: blocks whose 25 % byte credit bought none (small frames share protection) packets past the 256-per-frame cap (the first 256 stay protected), or frames that went out whole after the 4 ms flush budget ran out (no parity is built then). Packets the socket refused are `transportDrops`, never counted here |
 | `rtpPayload` | (`udp`/`unix` only) RTP payload size of the last video frame. `outgoing.maxPayloadSize` with `outgoing.fec` off; with it on, venc derives it: 3/2 of the smoothed mean non-IRAP slice, between 1400 (or a lower `maxPayloadSize`) and `maxPayloadSize`. Raise `maxPayloadSize` to the link's limit (at most 3780) to let it grow |
+| `frameEndLatencyUs` / `frameEndLatencyMaxUs` | (CV610 only) Capture to the frame's last encoded slice, in µs: mean and max over the last second of frames (`0` until the first second closes). Capture time is the encoder's PTS on the monotonic clock. With `video0.low_latency` the frame's earlier slices are already on the wire by then |
 | `framesSent` | (`frame-shm` only) Lifetime whole frames written into the ring.  The `frame-shm` counterpart of `packetsSent`: this transport carries one access unit per slot, not packets |
 | `oversizeDrops` | (SHM only) Frames rejected for exceeding slot capacity |
 | `slotCount` / `usedSlots` | (SHM only) Ring sizing; `usedSlots` is a snapshot |
@@ -2051,6 +2069,11 @@ in Notes. As of `contract_version: 0.29.0`:
 | `isp.aeEngine` ("sdk" only) | applied | applied | Unified AE selector landed in 0.10.13.  `custom` (userspace AE governor) is RETIRED — Maruko in 0.22.0, Star6E in 0.47.0 — and the value was **removed** in 0.47.0.  `sdk` is the only accepted value; any other (e.g. a stale `custom`) warns and falls back to `sdk`.  Both backends run the SDK firmware/bin AE for convergence plus a supervisory thread that enforces the `isp.gain*`/`isp.shutter*` limits.  CV610 has no such thread and reports `isp.aeEngine` unsupported: its ISP owns AE outright, and the two ceilings it does honour are written straight into `ot_isp_exposure_attr.auto_attr` instead. |
 
 ## Change Log (Contract)
+- `0.37.0` (additive; from venc 0.91.0): `video0.low_latency` /
+  `video0.lowLatency` (CV610 only, restart-only): early per-slice output,
+  VPSS low delay at one slice height and per-slice RTP send. Star6E and
+  Maruko report it unsupported. CV610's `GET /api/v1/transport/status`
+  gains `frameEndLatencyUs` and `frameEndLatencyMaxUs` on every transport.
 - `0.36.1` (patch; from venc 0.89.1): CV610 accepts `outgoing.audioPort=0`
   with a `unix://` video server and sends audio to that socket, as Star6E
   and Maruko do. Before, the config was refused. `frame-shm://` with

@@ -181,6 +181,7 @@ void venc_config_defaults(VencConfig *cfg)
 
 	/* H.265 multi-slice split (video0, all encoder backends) — 1 = off */
 	cfg->video0.slice_count = 1;
+	cfg->video0.low_latency = false;
 
 	/* Adaptive frame gate (video0) thresholds.  The gate has no switch:
 	 * it arms on every frame-shm output.  0 selects the frame_gate.h
@@ -669,6 +670,7 @@ static void load_video0(const cJSON *root, VencConfigVideo *v)
 		if (sc > VENC_SLICE_COUNT_MAX) sc = VENC_SLICE_COUNT_MAX;
 		v->slice_count = (uint32_t)sc;
 	}
+	v->low_latency = json_get_bool(obj, "lowLatency", v->low_latency);
 
 	/* Adaptive frame gate thresholds.  The gate itself has no switch — it
 	 * arms on any frame-shm transport; these only tune it. */
@@ -1451,6 +1453,7 @@ static void render_video0(PrettyBuf *p, const VencConfig *cfg, int is_last)
 	pp_field_uint(p,   2, "sceneThreshold", cfg->video0.scene_threshold, 0);
 	pp_field_uint(p,   2, "sceneHoldoff",   cfg->video0.scene_holdoff,   0);
 	pp_field_uint(p,   2, "sliceCount",     cfg->video0.slice_count,     0);
+	pp_field_bool(p,   2, "lowLatency",     cfg->video0.low_latency,     0);
 	pp_field_uint(p,   2, "frameGateCloseSlots",
 		cfg->video0.frame_gate_close_slots, 0);
 	pp_field_uint(p,   2, "frameGateMaxClosedMs",
@@ -1712,6 +1715,7 @@ static cJSON *config_to_cjson(const VencConfig *cfg)
 		cJSON_AddNumberToObject(vid, "sceneThreshold", cfg->video0.scene_threshold);
 		cJSON_AddNumberToObject(vid, "sceneHoldoff", cfg->video0.scene_holdoff);
 		cJSON_AddNumberToObject(vid, "sliceCount", cfg->video0.slice_count);
+		cJSON_AddBoolToObject(vid, "lowLatency", cfg->video0.low_latency);
 		cJSON_AddNumberToObject(vid, "frameGateCloseSlots",
 			cfg->video0.frame_gate_close_slots);
 		cJSON_AddNumberToObject(vid, "frameGateMaxClosedMs",

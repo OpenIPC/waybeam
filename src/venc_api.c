@@ -513,6 +513,14 @@ static const FieldUi ui_slice_count = {
 	"1080p delivers only 1,2,3,4,5,6,9,17 and saturates at 17. Restart-only."
 };
 
+static const FieldUi ui_low_latency = {
+	"Video", "Low latency (slices)", "toggle", 0, 0, 0, NULL,
+	"CV610: the encoder starts a frame once its first slice of rows is in "
+	"(VPSS low delay) and each slice is sent as soon as it is encoded. Frame "
+	"end moves from ~15.5 to ~9.4 ms at 720p100; no extra packets. Needs "
+	"sliceCount > 1 and a udp:// or unix:// output. Restart-only."
+};
+
 /* UI descriptors for the snapshot subsystem.  The whole section was API-only
  * (no static SECTIONS rows), so /snapshot.jpg could not be enabled or tuned
  * from the dashboard at all — these give it a "Snapshot" group rendered
@@ -664,6 +672,7 @@ static const FieldDesc g_fields[] = {
 	FIELD(video0, scene_threshold,  FT_UINT16, MUT_RESTART),
 	FIELD(video0, scene_holdoff,   FT_UINT8,  MUT_RESTART),
 	FIELD_UI(video0, slice_count,  FT_UINT,   MUT_RESTART, &ui_slice_count),
+	FIELD_UI(video0, low_latency,  FT_BOOL,   MUT_RESTART, &ui_low_latency),
 	/* Frame gate: restart-required like resilience/sliceCount.  It is a
 	 * set-once tuning knob, not something swept in flight, so it does not
 	 * earn a live-apply group. */
@@ -799,6 +808,7 @@ static const FieldAlias g_field_aliases[] = {
 	{ "video0.sceneThreshold", "video0.scene_threshold" },
 	{ "video0.sceneHoldoff", "video0.scene_holdoff" },
 	{ "video0.sliceCount", "video0.slice_count" },
+	{ "video0.lowLatency", "video0.low_latency" },
 	{ "video0.frameGateCloseSlots", "video0.frame_gate_close_slots" },
 	{ "video0.frameGateMaxClosedMs", "video0.frame_gate_max_closed_ms" },
 	{ "video0.intraRefreshQp", "video0.intra_refresh_qp" },
@@ -999,7 +1009,8 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 			"image.mirror", "image.flip",
 			"video0.fps", "video0.size",
 			"video0.bitrate", "video0.gop_size",
-			"video0.slice_count", "video0.resilience",
+			"video0.slice_count", "video0.low_latency",
+			"video0.resilience",
 			/* Read by cv610_runtime.c's frame_gate_setup() -- the
 			 * gate is armed whenever the output is a frame ring
 			 * (frame-shm://, the CV610 default), so both knobs are
@@ -1101,6 +1112,11 @@ int venc_api_field_supported_for_backend(const char *backend_name,
 	 * QP is inert on the SigmaStar parts.) */
 	if (backend_name && strcmp(backend_name, "cv610") != 0 &&
 	    strcmp(canonical_key, "video0.intra_refresh_qp") == 0)
+		return 0;
+	/* Early slice output and VPSS low delay are CV610 SDK features; the
+	 * SigmaStar backends have no reader for video0.low_latency. */
+	if (backend_name && strcmp(backend_name, "cv610") != 0 &&
+	    strcmp(canonical_key, "video0.low_latency") == 0)
 		return 0;
 
 	/* These controls have no Maruko implementation.  Keep them in the shared

@@ -1,5 +1,35 @@
 # History
 
+## [0.91.0] - 2026-11-24
+
+CV610 low-latency mode: `video0.lowLatency` (restart-only, default off).
+
+- **The encoder starts a frame before it is fully read out.** VPSS hands rows
+  to VENC after one slice height (32 px × LCU rows per slice: 128 lines at
+  720p with 6 slices, 192 at 1080p) instead of after the whole frame.
+- **Each slice leaves as soon as it is encoded.** The channel is created
+  stream-by-slice (`is_by_frame` off, `slice_output_en` on), and each slice's
+  RTP packets go out on its own `get_stream`. The wire is the same as
+  whole-frame output: marker on the last NAL, one RTP timestamp per frame,
+  FEC parity after the marker. Only the packets' timing moves.
+- **Measured on IMX662 with 6 slices** (probe, bench .142): the frame end
+  moved from 15.5 to 9.4 ms after capture at 720p100, and from 27.2 to
+  15.2 ms at 1080p60 (sensor mode 1). Packets per frame and QP were
+  unchanged.
+- **Refused, with a message,** without `sliceCount >= 2`, without a `udp://`
+  or `unix://` server, or with SVC-T. Star6E and Maruko report it
+  unsupported.
+- **`/api/v1/transport/status` gains `frameEndLatencyUs` and
+  `frameEndLatencyMaxUs`** on CV610: capture to the frame's last slice,
+  mean and max per second, with or without the mode.
+- **Sidecar:** the RTP seq/timestamp snapshot is taken when a frame opens
+  (its first `get_stream`) in both modes; `frame_ready_us` stays the
+  encode-complete time.
+- `cv610_send_rtp_frame()` is split into begin / per-NAL / end, shared by
+  both output paths. `cv610_copy_stream()` appends, so a low-latency frame's
+  slices collect into one access unit for the recorder, the sidecar and the
+  slice census.
+
 ## [0.90.4] - 2026-11-24
 
 CV610 `unix://` output under a full consumer queue.

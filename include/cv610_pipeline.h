@@ -41,6 +41,9 @@ typedef struct {
 	 * the loader set, which suits exactly one mode. */
 	uint32_t sensor_clock_hz;
 	int i2c_bus;
+	/* video0.low_latency: VPSS hands rows to VENC after this many lines
+	 * instead of after the whole frame.  0 = off. */
+	uint32_t low_delay_lines;
 } Cv610PipelineConfig;
 
 /* Start the MIPI -> VI -> ISP graph for config->sensor. */

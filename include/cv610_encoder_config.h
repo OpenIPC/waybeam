@@ -38,6 +38,11 @@ typedef struct {
 	uint32_t split_mode;
 	uint32_t split_size;
 	uint32_t expected_count;
+	/* video0.low_latency: slices leave the encoder as they finish
+	 * (is_by_frame off, slice_output_en on), and VPSS releases rows to it
+	 * after low_delay_lines, one slice height (0 = off). */
+	uint32_t early_output;
+	uint32_t low_delay_lines;
 } Cv610SliceConfig;
 
 typedef struct {
