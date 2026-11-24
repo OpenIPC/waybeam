@@ -7,15 +7,13 @@ CV610 `unix://` output under a full consumer queue.
 - **The rest of the frame is dropped.** The first send that times out drops
   the rest of the frame, as the contract says and as Star6E does. Before, each
   packet waited its own 2 ms and was dropped alone, so a frame left full of
-  holes and the encoder was throttled as well. The rest of the frame,
-  parameter sets and parity included, is refused without waiting, and its
-  sequence numbers are not spent: the receiver sees one gap.
+  holes and the encoder was throttled as well. The rest of the frame is
+  counted and skipped without waiting, and it still spends its sequence
+  numbers, so a receiver's gap equals the loss.
 - **The RTP timestamp follows the encoder's PTS step** instead of a fixed step
   per encoded frame. With `allowUnixEncoderStall` on, the SDK drops frames
   while the consumer blocks. The RTP clock then still follows real time and
   stays aligned with audio.
-- **`transportDrops`** counts the datagram that timed out and any refused
-  after it, not every packet of the frame.
 - **The first timeout calibrates the queue-fill denominator** to the consumer's
   real depth, as Star6E does. A consumer whose queue is shallower than the
   sysctl (created before the init script raised it, or sized on purpose) then

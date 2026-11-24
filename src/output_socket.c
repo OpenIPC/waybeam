@@ -437,22 +437,23 @@ void output_socket_note_saturation(int socket_handle, OutputSocketQueue *queue)
 		return;
 	__atomic_store_n(&queue->unix_capacity, queued, __ATOMIC_RELAXED);
 
-	/* First calibration reveals the peer's real queue depth, which is the
-	 * only way to catch a consumer that was started before max_dgram_qlen
-	 * was raised: the sysctl reads healthy, but that consumer's socket
-	 * kept the shallow depth it was created with, so the startup warning
-	 * stays silent.  Log once, on the cold path. */
+	/* First calibration reveals the peer's real queue depth.  A consumer
+	 * whose socket was created while the sysctl was lower (started before
+	 * it was raised, or set low on purpose for that one socket) keeps that
+	 * depth, and the startup warning cannot see it.  Note it once, on the
+	 * cold path. */
 	if (!__atomic_load_n(&queue->logged_capacity, __ATOMIC_RELAXED)) {
 		int dgrams = queued / UNIX_DGRAM_AVG_SKB_TRUESIZE_BYTES;
+		int qlen = read_unix_max_dgram_qlen();
 
 		__atomic_store_n(&queue->logged_capacity, 1, __ATOMIC_RELAXED);
-		if (dgrams < OUTPUT_SOCKET_UNIX_QLEN_RECOMMENDED / 2) {
+		if (qlen > 0 && dgrams < qlen / 2) {
 			fprintf(stderr,
-				"[output_socket] WARNING: unix:// peer queue holds only "
-				"~%d datagrams (%d B), shallower than "
-				"net.unix.max_dgram_qlen (%d): the consumer was started "
-				"before it was raised, or sized its queue on purpose.\n",
-				dgrams, queued, read_unix_max_dgram_qlen());
+				"[output_socket] NOTE: unix:// peer queue holds ~%d "
+				"datagrams (%d B), under the net.unix.max_dgram_qlen of "
+				"%d venc read: the consumer's socket was created while "
+				"the sysctl was lower.\n",
+				dgrams, queued, qlen);
 		}
 	}
 }

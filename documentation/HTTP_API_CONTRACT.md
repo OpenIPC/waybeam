@@ -689,7 +689,7 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
   When `false`, `unix://` sends use the 2 ms socket timeout and cumulative
   approximately 4 ms RTP frame budget; sustained pressure drops the unsent
   remainder of the frame so the encoder stays live. On CV610 the first send
-  that times out drops the rest of the frame, so a frame waits 2 ms at most.
+  that times out drops the rest of the frame: at most one timeout per frame.
   When `true`, those two
   bounds are disabled for `unix://` only: a full consumer queue blocks the
   encoder output thread until the consumer resumes, preserving the legacy

@@ -166,8 +166,9 @@ typedef struct {
 	/* PTS (us) of the last frame sent, so the RTP clock follows the
 	 * encoder's own time step (cv610_send_rtp_frame); 0 = none yet. */
 	uint64_t last_pts;
-	/* A send of this frame timed out: refuse the rest of it, Star6E's
-	 * discard_remaining.  Cleared per frame in cv610_send_rtp_frame. */
+	/* A send of this frame timed out: count and skip the rest of it,
+	 * Star6E's discard_remaining.  Cleared per frame in
+	 * cv610_send_rtp_frame. */
 	int discard_rest;
 	uint32_t live_bitrate;
 	uint16_t max_payload_size;
@@ -1661,7 +1662,7 @@ static int cv610_output_write(const uint8_t *header, size_t header_len,
 	 * See the seqlock note on transport_gen. */
 	if (ctx->discard_rest) {
 		__atomic_add_fetch(&ctx->output_drops, 1, __ATOMIC_RELAXED);
-		return -1;
+		return 0;
 	}
 	ret = output_socket_send_parts(ctx->tx.socket_handle,
 		&ctx->tx.destination,
@@ -1671,17 +1672,17 @@ static int cv610_output_write(const uint8_t *header, size_t header_len,
 		__atomic_add_fetch(&ctx->output_drops, 1, __ATOMIC_RELAXED);
 		/* A full queue (the bounded unix:// wait expired) drops the
 		 * rest of the frame, as documented and as Star6E does: one
-		 * timeout per frame, never one per packet, and the packetizer
-		 * stops instead of spending sequence numbers on packets that
-		 * never left.  The full queue also calibrates the fill
-		 * denominator to the consumer's real depth (Star6E parity),
+		 * timeout per frame, never one per packet.  The rest is
+		 * counted and its sequence numbers spent without sending, so a
+		 * receiver's gap still equals the loss.  The full queue also
+		 * calibrates the fill denominator to the consumer's real depth,
 		 * which can be shallower than the sysctl venc read at start. */
 		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS) {
 			output_socket_note_saturation(ctx->tx.socket_handle,
 				&ctx->send_queue);
 			ctx->discard_rest = 1;
+			return 0;
 		}
-		return -1;
 	} else {
 		__atomic_add_fetch(&ctx->packets_sent, 1, __ATOMIC_RELAXED);
 	}
@@ -1716,9 +1717,9 @@ static uint32_t cv610_frame_vcl_nal_count(const uint8_t *frame, size_t len)
 	return count;
 }
 
-/* Video datagrams.  Only a 0 return (sent) used its sequence number, so
- * only that packet is captured: source i stays seq base + i, and a frame
- * with a failed packet gets no parity. */
+/* Video datagrams.  A 0 return (sent, or counted as an EAGAIN drop) used
+ * its sequence number, so the packet is captured either way: source i
+ * stays seq base + i. */
 static int cv610_video_write(const uint8_t *header, size_t header_len,
 	const uint8_t *payload1, size_t payload1_len,
 	const uint8_t *payload2, size_t payload2_len, void *opaque)
@@ -1802,7 +1803,10 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 	 * RTP clock against real time and audio.  No usable PTS step (first
 	 * frame, no PTS, backwards, or over a second): the nominal frame. */
 	if (pts > ctx->last_pts && ctx->last_pts && pts - ctx->last_pts < 1000000)
-		ctx->rtp.timestamp += (uint32_t)((pts - ctx->last_pts) * 90 / 1000);
+		/* Telescoping: each step rounds against the absolute PTS,
+		 * so truncation never accumulates into drift. */
+		ctx->rtp.timestamp += (uint32_t)(pts * 9 / 100 -
+			ctx->last_pts * 9 / 100);
 	else
 		ctx->rtp.timestamp += ctx->frame_ticks;
 	ctx->last_pts = pts;
