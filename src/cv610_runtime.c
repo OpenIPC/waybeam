@@ -1673,9 +1673,14 @@ static int cv610_output_write(const uint8_t *header, size_t header_len,
 		 * rest of the frame, as documented and as Star6E does: one
 		 * timeout per frame, never one per packet, and the packetizer
 		 * stops instead of spending sequence numbers on packets that
-		 * never left. */
-		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS)
+		 * never left.  The full queue also calibrates the fill
+		 * denominator to the consumer's real depth (Star6E parity),
+		 * which can be shallower than the sysctl venc read at start. */
+		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS) {
+			output_socket_note_saturation(ctx->tx.socket_handle,
+				&ctx->send_queue);
 			ctx->discard_rest = 1;
+		}
 		return -1;
 	} else {
 		__atomic_add_fetch(&ctx->packets_sent, 1, __ATOMIC_RELAXED);

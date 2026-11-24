@@ -449,9 +449,9 @@ void output_socket_note_saturation(int socket_handle, OutputSocketQueue *queue)
 		if (dgrams < OUTPUT_SOCKET_UNIX_QLEN_RECOMMENDED / 2) {
 			fprintf(stderr,
 				"[output_socket] WARNING: unix:// peer queue holds only "
-				"~%d datagrams (%d B) — the consumer was started before "
-				"net.unix.max_dgram_qlen was raised (it now reads %d). "
-				"Restart the consumer to pick up the deeper queue.\n",
+				"~%d datagrams (%d B), shallower than "
+				"net.unix.max_dgram_qlen (%d): the consumer was started "
+				"before it was raised, or sized its queue on purpose.\n",
 				dgrams, queued, read_unix_max_dgram_qlen());
 		}
 	}

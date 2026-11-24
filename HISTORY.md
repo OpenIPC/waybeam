@@ -16,6 +16,12 @@ CV610 `unix://` output under a full consumer queue.
   stays aligned with audio.
 - **`transportDrops`** counts the datagram that timed out and any refused
   after it, not every packet of the frame.
+- **The first timeout calibrates the queue-fill denominator** to the consumer's
+  real depth, as Star6E does. A consumer whose queue is shallower than the
+  sysctl (created before the init script raised it, or sized on purpose) then
+  reads 100 % when full instead of a fraction (#156). With
+  `allowUnixEncoderStall` on there is no timeout, so no calibration; the stall
+  itself is the signal.
 
 ## [0.90.3] - 2026-11-23
 
