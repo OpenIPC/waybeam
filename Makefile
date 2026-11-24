@@ -41,7 +41,12 @@ MARUKO_CC ?= $(TOOLCHAIN_MARUKO_DIR)/bin/arm-openipc-linux-musleabihf-gcc
 # libraries are not redistributed by this repository.
 CV610_CC ?= $(CC_CV610_BIN)
 CV610_SDK_INC ?= ../openhisilicon
-CV610_SDK_LIB ?= ../firmware/output/target/usr/lib
+# The vendor runtime libraries as OpenIPC's firmware tree ships them, which is
+# what CI pins and what every CV610 image installs.  Not a buildroot
+# output/target/usr/lib: that tree can carry buildroot's own opus, whose
+# SONAME libopus.so.0 the camera images lack (see the check at the link).
+CV610_SDK_LIB ?= ../firmware/general/package/hisilicon-osdrv-hi3516cv6xx/files/lib
+CV610_READELF ?= $(patsubst %gcc,%readelf,$(CV610_CC))
 CV610_CC_SUBMAKE := $(if $(findstring /,$(CV610_CC)),$(abspath $(CV610_CC)),$(CV610_CC))
 
 # Vendor PQ library, needed for isp.sensorBin and /api/v1/iq/export_bin on
@@ -177,6 +182,18 @@ SOC_CFLAGS := -I$(CV610_SDK_INC)/kernel/include/hi3516cv6xx \
 SOC_DEFS := -DPLATFORM_CV610 -DHAVE_BACKEND_CV610=1 \
 	-DHAVE_CV610_HTTP_API=1
 SOC_LDFLAGS := -Wl,--allow-shlib-undefined
+# The vendor libopus.so has no SONAME, so the binary must NEED "libopus.so".
+# Linked against a SONAME'd buildroot opus it NEEDs libopus.so.0 instead, and
+# fails to start on a camera that only has the vendor file.  Checked on the
+# binary, not the lib dir: with no libopus.so in CV610_SDK_LIB the linker
+# silently takes the toolchain sysroot's, which is SONAME'd too.
+SOC_POSTLINK = dyn=$$($(CV610_READELF) -d $@) || { rm -f $@; \
+		echo "ERROR: cannot check $@: $(CV610_READELF) failed" >&2; exit 1; }; \
+	case "$$dyn" in *'[libopus.so.0]'*) rm -f $@; \
+		echo "ERROR: $@ links libopus.so.0 -- CV610_SDK_LIB ($(CV610_SDK_LIB)) holds a" \
+			"buildroot opus or no libopus.so (the toolchain sysroot's is used then);" \
+			"use the osdrv lib dir, see CV610_SDK_LIB in the Makefile" >&2; \
+		exit 1;; esac
 SOC_LIBS := -lss_mpi -lss_mpi_isp -lss_mpi_ae -lss_mpi_awb \
 	-lot_mpi_isp -lss_mpi_sysmem -lss_mpi_sysbind \
 	-lss_mpi_audio -lss_mpi_audio_adp \
@@ -295,6 +312,7 @@ $(OBJ_DIR)/%.o: %.c VERSION
 # COMMON_CFLAGS.
 $(TARGET): $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) $(if $(DRV),-L$(DRV),) $(if $(DRV_EXTRA),-L$(DRV_EXTRA),) $(if $(DRV),-Ltools,) $(BASE_LIBS) $(SOC_LIBS) -o $@
+	@$(SOC_POSTLINK)
 
 -include $(DEPS)
 

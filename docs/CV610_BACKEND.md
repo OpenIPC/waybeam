@@ -108,12 +108,12 @@ this repository.
 make build SOC_BUILD=cv610 \
   CV610_CC=/path/to/arm-openipc-linux-musleabi-gcc \
   CV610_SDK_INC=/path/to/openhisilicon \
-  CV610_SDK_LIB=/path/to/cv610/rootfs/usr/lib
+  CV610_SDK_LIB=/path/to/firmware/general/package/hisilicon-osdrv-hi3516cv6xx/files/lib
 
 make sensor-cv610 SOC_BUILD=cv610 \
   CV610_CC=/path/to/arm-openipc-linux-musleabi-gcc \
   CV610_SDK_INC=/path/to/openhisilicon \
-  CV610_SDK_LIB=/path/to/cv610/rootfs/usr/lib
+  CV610_SDK_LIB=/path/to/firmware/general/package/hisilicon-osdrv-hi3516cv6xx/files/lib
 ```
 
 Install `out/cv610/waybeam` as `/usr/bin/waybeam`, the plugin
