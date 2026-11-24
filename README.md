@@ -83,7 +83,7 @@ make build SOC_BUILD=maruko
 make build SOC_BUILD=cv610 \
   CV610_CC=/path/to/arm-openipc-linux-musleabi-gcc \
   CV610_SDK_INC=/path/to/openhisilicon \
-  CV610_SDK_LIB=/path/to/cv610/rootfs/usr/lib
+  CV610_SDK_LIB=/path/to/firmware/general/package/hisilicon-osdrv-hi3516cv6xx/files/lib
 ```
 
 The toolchain is auto-downloaded on first build. Each backend builds to
@@ -397,7 +397,7 @@ curl http://<device-ip>:<port>/api/v1/version
 ```
 
 ```json
-{"ok":true,"data":{"app_version":"0.91.0","backend":"star6e","contract_version":"0.37.0","config_schema_version":"1.0.0"}}
+{"ok":true,"data":{"app_version":"0.91.1","backend":"star6e","contract_version":"0.37.0","config_schema_version":"1.0.0"}}
 ```
 
 #### GET /api/v1/config

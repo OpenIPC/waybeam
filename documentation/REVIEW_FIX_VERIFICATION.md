@@ -35,7 +35,7 @@ CV610 lint needs the OpenHisilicon SDK headers and libs:
 ```
 make lint SOC_BUILD=cv610 \
   CV610_SDK_INC=<openhisilicon checkout> \
-  CV610_SDK_LIB=<firmware output>/per-package/hisilicon-opensdk/target/usr/lib
+  CV610_SDK_LIB=<firmware>/general/package/hisilicon-osdrv-hi3516cv6xx/files/lib
 ```
 
 ## 2. Hardware verification

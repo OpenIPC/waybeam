@@ -1,5 +1,24 @@
 # History
 
+## [0.91.1] - 2026-11-24
+
+CV610 build: link against the vendor libopus the camera images ship.
+
+- **`CV610_SDK_LIB` defaults to the firmware tree's
+  `general/package/hisilicon-osdrv-hi3516cv6xx/files/lib`**, the directory CI
+  pins and every CV610 image installs. The old default,
+  `../firmware/output/target/usr/lib`, is a buildroot output. That output
+  can carry buildroot's own opus, whose SONAME is `libopus.so.0`, and a
+  binary linked against it does not start on a camera that only has the
+  vendor `libopus.so` (no SONAME): `Error loading shared library
+  libopus.so.0`. Seen deploying 0.91.0 from a local build.
+- **The link now fails** if the CV610 binary NEEDs `libopus.so.0`. It
+  names `CV610_SDK_LIB` and removes the binary, so such a binary is never
+  staged.
+- README, `docs/CV610_BACKEND.md` and the review-verification guide name the
+  same directory. No code or API change: a build against the right directory
+  is byte-identical to 0.91.0's.
+
 ## [0.91.0] - 2026-11-24
 
 CV610 low-latency mode: `video0.lowLatency` (restart-only, default off).
