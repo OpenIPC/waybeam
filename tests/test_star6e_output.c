@@ -1533,17 +1533,16 @@ static int test_star6e_output_backpressure_hysteresis(void)
 
 /* The stall-mode send (CV610 with allowUnixEncoderStall): a BLOCKING unix
  * socket tried with MSG_DONTWAIT refuses at once when the peer is full
- * instead of waiting, and that refusal calibrates the fill denominator, so
- * a stalled encoder reads as saturated.  SO_SNDTIMEO makes a regression
- * that drops the flag fail on the time check instead of hanging. */
+ * instead of waiting; that refusal is the calibration event (covered by the
+ * backpressure test below).  SO_SNDTIMEO makes a regression that drops the
+ * flag fail on the time check instead of hanging. */
 static int test_output_socket_dontwait_calibrates_a_blocking_socket(void)
 {
 	char name[64];
 	struct sockaddr_storage dst;
 	struct sockaddr_un *un = (struct sockaddr_un *)&dst;
 	struct timeval timeout = { .tv_sec = 1, .tv_usec = 0 };
-	OutputSocketQueue queue;
-	uint8_t header[12] = { 0x80 }, payload[1400], fill = 0;
+	uint8_t header[12] = { 0x80 }, payload[1400];
 	struct timespec t0, t1;
 	socklen_t dst_len;
 	int recv_fd, fd, sent = 0, ret = 0, err = 0, failures = 0;
@@ -1558,8 +1557,6 @@ static int test_output_socket_dontwait_calibrates_a_blocking_socket(void)
 	memcpy(un->sun_path + 1, name, strlen(name));
 	dst_len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + strlen(name));
 	(void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-	memset(&queue, 0, sizeof(queue));
-	CHECK("dontwait capacity", output_socket_capture_capacity(fd, &queue) == 0);
 	memset(payload, 'X', sizeof(payload));
 	for (int i = 0; i < 4096; i++) {
 		clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -1575,11 +1572,6 @@ static int test_output_socket_dontwait_calibrates_a_blocking_socket(void)
 	ms = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
 	CHECK("dontwait filled the peer", sent > 0 && ret != 0 && err == EAGAIN);
 	CHECK("dontwait refused without waiting", ms < 100);
-	output_socket_note_saturation(fd, &queue);
-	CHECK("dontwait calibrated", queue.unix_capacity > 0);
-	CHECK("dontwait reads saturated",
-		output_socket_get_fill_pct(fd, &queue, &fill) == 0 &&
-		fill >= VENC_PRESSURE_HIGH_WATER_PCT);
 	if (fd >= 0) close(fd);
 	if (recv_fd >= 0) close(recv_fd);
 	return failures;
