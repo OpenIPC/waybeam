@@ -1664,10 +1664,25 @@ static int cv610_output_write(const uint8_t *header, size_t header_len,
 		__atomic_add_fetch(&ctx->output_drops, 1, __ATOMIC_RELAXED);
 		return 0;
 	}
-	ret = output_socket_send_parts(ctx->tx.socket_handle,
+	/* With allowUnixEncoderStall the send blocks and never times out, so
+	 * the full queue that calibrates the fill denominator below would never
+	 * be seen: try without waiting first, and on a full queue calibrate,
+	 * then wait as the mode asks.  A send with room costs nothing extra. */
+	const int stall = ctx->config.outgoing.allow_unix_encoder_stall;
+
+	ret = output_socket_send_parts_flags(ctx->tx.socket_handle,
 		&ctx->tx.destination,
 		ctx->tx.destination_len, ctx->tx.connected_udp, header, header_len,
-		payload1, payload1_len, payload2, payload2_len);
+		payload1, payload1_len, payload2, payload2_len,
+		stall ? MSG_DONTWAIT : 0);
+	if (ret != 0 && stall && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+		output_socket_note_saturation(ctx->tx.socket_handle,
+			&ctx->send_queue);
+		ret = output_socket_send_parts_flags(ctx->tx.socket_handle,
+			&ctx->tx.destination, ctx->tx.destination_len,
+			ctx->tx.connected_udp, header, header_len, payload1,
+			payload1_len, payload2, payload2_len, 0);
+	}
 	if (ret != 0) {
 		__atomic_add_fetch(&ctx->output_drops, 1, __ATOMIC_RELAXED);
 		/* A full queue (the bounded unix:// wait expired) drops the
@@ -1800,9 +1815,10 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 	/* An output failure may drop this access unit, but time still advances
 	 * -- by the encoder's PTS step (us to 90 kHz), so a frame the SDK
 	 * dropped under an encoder stall widens the gap instead of slowing the
-	 * RTP clock against real time and audio.  No usable PTS step (first
-	 * frame, no PTS, backwards, or over a second): the nominal frame. */
-	if (pts > ctx->last_pts && ctx->last_pts && pts - ctx->last_pts < 1000000)
+	 * RTP clock against real time and audio, however long the stall.  No
+	 * usable PTS step (first frame, no PTS, or backwards): the nominal
+	 * frame. */
+	if (pts > ctx->last_pts && ctx->last_pts)
 		/* Telescoping: each step rounds against the absolute PTS,
 		 * so truncation never accumulates into drift. */
 		ctx->rtp.timestamp += (uint32_t)(pts * 9 / 100 -

@@ -124,6 +124,15 @@ int output_socket_send_parts(int socket_handle,
 	const uint8_t *payload1, size_t payload1_len,
 	const uint8_t *payload2, size_t payload2_len);
 
+/** output_socket_send_parts() with sendmsg() flags, e.g. MSG_DONTWAIT to
+ *  try a blocking socket without waiting. */
+int output_socket_send_parts_flags(int socket_handle,
+	const struct sockaddr_storage *dst, socklen_t dst_len,
+	int connected_udp,
+	const uint8_t *header, size_t header_len,
+	const uint8_t *payload1, size_t payload1_len,
+	const uint8_t *payload2, size_t payload2_len, int flags);
+
 /** Producer-side queue-fill snapshot for udp:// / unix:// outputs.
  *
  * Reads SIOCOUTQ (current bytes in send queue) and divides by the capacity
