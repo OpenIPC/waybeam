@@ -109,7 +109,7 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.90.3",
+    "app_version": "0.90.4",
     "contract_version": "0.36.1",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
@@ -688,7 +688,9 @@ curl "http://<device-ip>/api/v1/set?outgoing.allowUnixEncoderStall=true"
 - `outgoing.allow_unix_encoder_stall`: Restart-required boolean, default `false`.
   When `false`, `unix://` sends use the 2 ms socket timeout and cumulative
   approximately 4 ms RTP frame budget; sustained pressure drops the unsent
-  remainder of the frame so the encoder stays live. When `true`, those two
+  remainder of the frame so the encoder stays live. On CV610 the first send
+  that times out drops the rest of the frame, so a frame waits 2 ms at most.
+  When `true`, those two
   bounds are disabled for `unix://` only: a full consumer queue blocks the
   encoder output thread until the consumer resumes, preserving the legacy
   behavior. UDP, `shm://`, and `frame-shm://` are unaffected. The 256-datagram

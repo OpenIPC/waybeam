@@ -1,5 +1,22 @@
 # History
 
+## [0.90.4] - 2026-11-24
+
+CV610 `unix://` output under a full consumer queue.
+
+- **The rest of the frame is dropped.** The first send that times out drops
+  the rest of the frame, as the contract says and as Star6E does. Before, each
+  packet waited its own 2 ms and was dropped alone, so a frame left full of
+  holes and the encoder was throttled as well. The rest of the frame,
+  parameter sets and parity included, is refused without waiting, and its
+  sequence numbers are not spent: the receiver sees one gap.
+- **The RTP timestamp follows the encoder's PTS step** instead of a fixed step
+  per encoded frame. With `allowUnixEncoderStall` on, the SDK drops frames
+  while the consumer blocks. The RTP clock then still follows real time and
+  stays aligned with audio.
+- **`transportDrops`** counts the datagram that timed out and any refused
+  after it, not every packet of the frame.
+
 ## [0.90.3] - 2026-11-23
 
 CV610's init script raises `net.unix.max_dgram_qlen` to 256 before venc

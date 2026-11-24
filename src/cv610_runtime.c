@@ -163,6 +163,12 @@ typedef struct {
 	Cv610AudioState *audio;
 	HevcRtpStats rtp_stats;
 	uint32_t frame_ticks;
+	/* PTS (us) of the last frame sent, so the RTP clock follows the
+	 * encoder's own time step (cv610_send_rtp_frame); 0 = none yet. */
+	uint64_t last_pts;
+	/* A send of this frame timed out: refuse the rest of it, Star6E's
+	 * discard_remaining.  Cleared per frame in cv610_send_rtp_frame. */
+	int discard_rest;
 	uint32_t live_bitrate;
 	uint16_t max_payload_size;
 	int verbose;
@@ -1653,14 +1659,24 @@ static int cv610_output_write(const uint8_t *header, size_t header_len,
 	 * state on the fd, so a concurrent connect() retargets mid-frame and the
 	 * snapshot provides none of the protection this comment used to claim.
 	 * See the seqlock note on transport_gen. */
+	if (ctx->discard_rest) {
+		__atomic_add_fetch(&ctx->output_drops, 1, __ATOMIC_RELAXED);
+		return -1;
+	}
 	ret = output_socket_send_parts(ctx->tx.socket_handle,
 		&ctx->tx.destination,
 		ctx->tx.destination_len, ctx->tx.connected_udp, header, header_len,
 		payload1, payload1_len, payload2, payload2_len);
 	if (ret != 0) {
 		__atomic_add_fetch(&ctx->output_drops, 1, __ATOMIC_RELAXED);
+		/* A full queue (the bounded unix:// wait expired) drops the
+		 * rest of the frame, as documented and as Star6E does: one
+		 * timeout per frame, never one per packet, and the packetizer
+		 * stops instead of spending sequence numbers on packets that
+		 * never left. */
 		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS)
-			return 0;
+			ctx->discard_rest = 1;
+		return -1;
 	} else {
 		__atomic_add_fetch(&ctx->packets_sent, 1, __ATOMIC_RELAXED);
 	}
@@ -1695,9 +1711,9 @@ static uint32_t cv610_frame_vcl_nal_count(const uint8_t *frame, size_t len)
 	return count;
 }
 
-/* Video datagrams.  A 0 return (sent, or counted as an EAGAIN drop) used
- * its sequence number, so the packet is captured either way: source i
- * stays seq base + i. */
+/* Video datagrams.  Only a 0 return (sent) used its sequence number, so
+ * only that packet is captured: source i stays seq base + i, and a frame
+ * with a failed packet gets no parity. */
 static int cv610_video_write(const uint8_t *header, size_t header_len,
 	const uint8_t *payload1, size_t payload1_len,
 	const uint8_t *payload2, size_t payload2_len, void *opaque)
@@ -1713,7 +1729,7 @@ static int cv610_video_write(const uint8_t *header, size_t header_len,
 }
 
 static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
-	const uint8_t *frame, size_t len)
+	const uint8_t *frame, size_t len, uint64_t pts)
 {
 	size_t cursor = 0;
 	const uint8_t *nal;
@@ -1725,6 +1741,7 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 		__ATOMIC_RELAXED);
 	uint16_t max_payload;
 
+	ctx->discard_rest = 0;
 	venc_fec_begin_frame(&ctx->fec);
 	max_payload = __atomic_load_n(&ctx->max_payload_size, __ATOMIC_ACQUIRE);
 	if (ctx->fec.frame) /* derived with parity on; the ceiling stays the cap */
@@ -1774,8 +1791,16 @@ static int cv610_send_rtp_frame(Cv610RunnerContext *ctx,
 			__atomic_load_n(&ctx->packets_sent, __ATOMIC_RELAXED) -
 			sent0), __ATOMIC_RELAXED);
 	}
-	/* An output failure may drop this access unit, but time still advances. */
-	ctx->rtp.timestamp += ctx->frame_ticks;
+	/* An output failure may drop this access unit, but time still advances
+	 * -- by the encoder's PTS step (us to 90 kHz), so a frame the SDK
+	 * dropped under an encoder stall widens the gap instead of slowing the
+	 * RTP clock against real time and audio.  No usable PTS step (first
+	 * frame, no PTS, backwards, or over a second): the nominal frame. */
+	if (pts > ctx->last_pts && ctx->last_pts && pts - ctx->last_pts < 1000000)
+		ctx->rtp.timestamp += (uint32_t)((pts - ctx->last_pts) * 90 / 1000);
+	else
+		ctx->rtp.timestamp += ctx->frame_ticks;
+	ctx->last_pts = pts;
 	return nal_count > 0 ? status : -1;
 }
 
@@ -2938,7 +2963,9 @@ static int cv610_run(void *opaque)
 			} else if (ctx->tx.output_enabled &&
 				ctx->tx.socket_handle >= 0) {
 				/* cv610_output_write owns per-datagram drop accounting. */
-				(void)cv610_send_rtp_frame(ctx, frame, frame_len);
+				(void)cv610_send_rtp_frame(ctx, frame, frame_len,
+					stream.pack_cnt ?
+					(uint64_t)stream.pack[0].pts : 0);
 			}
 
 			/* Maintain the latched pressure flag on the producer
