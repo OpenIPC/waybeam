@@ -350,10 +350,11 @@ endpoint lists is exactly what `/api/v1/set` accepts — for the sensor
 `$SENSOR` names. Each table mirrors its plugin's own (`g_imx662_mode_tbl` in
 `sensors/cv610/imx662/imx662_cmos.c`, `mode_tbl[]` in openhisilicon's
 `sony_imx335`); adding a mode means editing both.  The exception is a row
-that is a slower frame of an existing plugin mode: IMX662's 95 and 94 fps rows are
-the plugin's 100 fps mode with VMAX stretched by `cmos_fps_set()`, so they
-have no plugin row of their own.  Append new rows: `sensor.mode` indices are config. The geometry listed by
-`/api/v1/modes` is what the sensor captures, not the encoded size.
+that is a slower frame of an existing plugin mode: IMX662's 95 and 94 fps
+rows are the plugin's 100 fps mode with VMAX stretched by `cmos_fps_set()`,
+so they have no plugin row of their own.  Append new rows: `sensor.mode`
+indices are config.  The geometry listed by `/api/v1/modes` is what the
+sensor captures, not the encoded size.
 
 A zero `video0.size` (`auto`) means the mode's own capture size, rounded
 down to a multiple of 8 (IMX335's binned 1296x972 encodes 1296x968). A half-set

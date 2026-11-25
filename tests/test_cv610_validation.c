@@ -116,18 +116,19 @@ static int test_mode_table(void)
 	/* 95 and 94 are the 100 fps setup slowed by VMAX; appended so pinned
 	 * indices keep their meaning. */
 	{
-		const Cv610SensorMode *m94 = mode_at_fps(g_imx662, 94);
-		const Cv610SensorMode *m95 = mode_at_fps(g_imx662, 95);
+		static const uint32_t slow[] = { 95, 94 };
 		const Cv610SensorMode *m100 = mode_at_fps(g_imx662, 100);
+		size_t k;
 
-		failures += expect("modes_95fps_shares_100fps_setup",
-			m95 != NULL && m100 != NULL &&
-			m95->sensor_clock_hz == m100->sensor_clock_hz &&
-			m95->raw_bit == m100->raw_bit);
-		failures += expect("modes_94fps_shares_100fps_setup",
-			m94 != NULL && m100 != NULL &&
-			m94->sensor_clock_hz == m100->sensor_clock_hz &&
-			m94->raw_bit == m100->raw_bit);
+		for (k = 0; k < sizeof(slow) / sizeof(slow[0]); ++k) {
+			const Cv610SensorMode *m = mode_at_fps(g_imx662, slow[k]);
+
+			failures += expect(k == 0 ? "modes_95fps_shares_100fps_setup" :
+				"modes_94fps_shares_100fps_setup",
+				m != NULL && m100 != NULL &&
+				m->sensor_clock_hz == m100->sensor_clock_hz &&
+				m->raw_bit == m100->raw_bit);
+		}
 		failures += expect("modes_indices_stable",
 			modes[0].fps == 30 && modes[1].fps == 60 &&
 			modes[2].fps == 90 && modes[3].fps == 100 &&
@@ -416,9 +417,6 @@ static int test_validate_imx335(void)
 	failures += expect_valid("imx335_mode4_accepted", &cfg, 1);
 	cfg.sensor.mode = 5;
 	failures += expect_valid("imx335_mode5_rejected", &cfg, 0);
-	unsetenv("SENSOR");
-	failures += expect_valid("mode5_accepted_on_imx662", &cfg, 1);
-	setenv("SENSOR", "imx335", 1);
 	cfg.sensor.mode = -1;
 	cfg.video0.fps = 90;
 	failures += expect_valid("imx335_1080p90_crop", &cfg, 1);

@@ -12,7 +12,7 @@
  * so a mismatch is silent: frames simply arrive at fps * actual / expected
  * while /fps/live and /api/v1/modes both still report the nominal rate.
  * Measured 43.6 fps for the 60 fps mode when it ran on the 100 fps mode's
- * 27 MHz clock.  Only the 100 fps setup (100 and 95) takes the sensor's 24 MHz
+ * 27 MHz clock.  Only the 100 fps setup (100, 95 and 94) takes the sensor's 24 MHz
  * INCK profile overclocked to 27 MHz (INCK_SEL 0x04); the rest run 37.125 MHz.
  *
  * 95 fps is the 100 fps mode with a longer frame: the plugin takes its
