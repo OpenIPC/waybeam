@@ -1,5 +1,24 @@
 # History
 
+## [0.92.0] - 2026-11-25
+
+CV610 IMX662: a 95 fps sensor mode, for a VRR display with a 100 Hz ceiling.
+
+- **New mode 4, "1080p95 RAW10".** It is the 100 fps mode with a longer
+  frame: the plugin takes its 100 fps setup for any rate above 90 and
+  stretches VMAX by 100/95, so it keeps that mode's 27 MHz clock, RAW10 and
+  readout. `video0.fps: 95` (or 91–95) now selects it; before, it ran the
+  100 fps mode. 720p95 scales down from it as 720p100 does.
+- **Why 95:** a VRR panel can show frames no closer together than 1/max. At
+  exactly 100 fps on a 100 Hz panel, any clock skew or arrival jitter queues
+  frames. 95 fps leaves about 0.5 ms of slack per frame. On a fixed-refresh
+  100 Hz display, keep 100 fps.
+- **Appended last**, so the existing `sensor.mode` indices (0–3) and every
+  config that pins one keep their meaning.
+- **Measured on IMX662, 720p with `lowLatency`:** ISP 95.00 fps, VENC
+  frame interval 10,506 µs (against 9,998 µs at 100), frame end 10.0 ms in
+  both, 0 drops.
+
 ## [0.91.1] - 2026-11-24
 
 CV610 build: link against the vendor libopus the camera images ship.

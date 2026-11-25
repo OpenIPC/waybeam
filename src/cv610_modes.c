@@ -3,9 +3,9 @@
 #include <stdlib.h>
 #include <strings.h>
 
-/* ---- IMX662: 1920x1080, four rates ---------------------------------------
+/* ---- IMX662: 1920x1080, five rates ---------------------------------------
  *
- * All four entries are hardware-verified on the IMX662 bring-up board.
+ * All five entries are hardware-verified on the IMX662 bring-up board.
  *
  * The clock column is the one that bites.  The sensor keeps whatever line
  * timing it was programmed with regardless of the MCLK it is actually fed,
@@ -13,12 +13,20 @@
  * while /fps/live and /api/v1/modes both still report the nominal rate.
  * Measured 43.6 fps for the 60 fps mode when it ran on the 100 fps mode's
  * 27 MHz clock.  Only 100 fps takes the sensor's 24 MHz INCK profile
- * overclocked to 27 MHz (INCK_SEL 0x04); the rest run 37.125 MHz. */
+ * overclocked to 27 MHz (INCK_SEL 0x04); the rest run 37.125 MHz.
+ *
+ * 95 fps is the 100 fps mode with a longer frame: the plugin takes its
+ * 100 fps setup for any rate above 90 and stretches VMAX by 100/95
+ * (cmos_fps_set), so it shares that mode's clock, bit depth and readout.  It
+ * exists for a VRR display whose ceiling is 100 Hz: at exactly 100 fps any
+ * clock skew queues frames against the panel's minimum frame time.  Appended
+ * last, because /api/v1/modes indices (sensor.mode) must not move. */
 static const Cv610SensorMode g_imx662_modes[] = {
 	{ 1920, 1080,  30, 12, 37125000u, "1080p30 RAW12", 0 },
 	{ 1920, 1080,  60, 12, 37125000u, "1080p60 RAW12", 0 },
 	{ 1920, 1080,  90, 10, 37125000u, "1080p90 RAW10", 0 },
 	{ 1920, 1080, 100, 10, 27000000u, "1080p100 RAW10", 0 },
+	{ 1920, 1080,  95, 10, 27000000u, "1080p95 RAW10", 0 },
 };
 
 /* ---- IMX335: 2592x1944 and crops, five fixed modes -----------------------
