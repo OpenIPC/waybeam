@@ -176,9 +176,9 @@ static td_void cmos_fps_set(ot_vi_pipe vi_pipe, td_float fps, ot_isp_ae_sensor_d
 	ae_sns_dft->max_int_time   = sns_state->fl_std - IMX662_MIN_SHR0_LINEAR;
 	/* The running frame length follows the new rate too: cmos_inttime_update()
 	 * computes SHR0 against fl[0], so a stale one offsets exposure by the
-	 * frame-length change once VMAX has moved.  Bring-up publishes each mode's
-	 * own rate, so only a runtime ISP frame-rate change reaches this with a
-	 * new one. */
+	 * frame-length change once VMAX has moved.  Bring-up reaches this with a
+	 * rate below the mode's own too: venc's 95 fps row runs the 100 fps mode,
+	 * and this stretch is what makes it 95. */
 	sns_state->fl[0]           = sns_state->fl_std;
 	ae_sns_dft->full_lines     = sns_state->fl[0];
 	cmos_config_vmax(sns_state, vmax);

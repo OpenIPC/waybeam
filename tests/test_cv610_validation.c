@@ -123,7 +123,8 @@ static int test_mode_table(void)
 			m95 != NULL && m95->sensor_clock_hz == 27000000u &&
 			m95->raw_bit == 10);
 		failures += expect("modes_indices_stable",
-			modes[1].fps == 60 && modes[3].fps == 100 &&
+			modes[0].fps == 30 && modes[1].fps == 60 &&
+			modes[2].fps == 90 && modes[3].fps == 100 &&
 			modes[count - 1].fps == 95);
 	}
 	return failures;
