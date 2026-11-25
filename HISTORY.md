@@ -1,5 +1,20 @@
 # History
 
+## [0.93.0] - 2026-11-25
+
+CV610 IMX662: a 94 fps sensor mode, the measured best rate for a 100 Hz VRR
+display.
+
+- **New mode 5, "1080p94 RAW10":** mode 4's 100 fps setup, VMAX stretched
+  to 94. `video0.fps: 91`–`94` now selects it; 95 still selects mode 4 and
+  96–99 mode 3.
+- **Why 94:** swept on a 100 Hz FreeSync panel (last packet to flip), with
+  a test build that ran the sensor at every rate from 91 to 99:
+  - 1080p: 91–94 arrived exact with every frame shown, p50 3.9 ms. From 95
+    up, a frame landing within 10 ms of the previous flip is superseded.
+  - 720p: 94 is p50 3.0 ms, against 4.8 at 99 and 9.1 at native 100.
+- **Appended last**, so pinned `sensor.mode` 0–4 keep their meaning.
+
 ## [0.92.0] - 2026-11-25
 
 CV610 IMX662: a 95 fps sensor mode, for a VRR display with a 100 Hz ceiling.

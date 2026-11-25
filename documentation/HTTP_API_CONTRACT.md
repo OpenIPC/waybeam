@@ -109,7 +109,7 @@ Response `200`:
 {
   "ok": true,
   "data": {
-    "app_version": "0.92.0",
+    "app_version": "0.93.0",
     "contract_version": "0.37.0",
     "config_schema_version": "1.0.0",
     "backend": "star6e"
@@ -1810,7 +1810,7 @@ mode's usable output, which can be smaller than its capture `width`.
 
 **CV610 note — every advertised mode is selectable, but only against a
 sys_config that exposes the runtime sensor clock.** The IMX662 runs 30/60/90
-fps on a 37.125 MHz input clock and 95/100 fps on 27 MHz (27 MHz fed while the
+fps on a 37.125 MHz input clock and 94/95/100 fps on 27 MHz (27 MHz fed while the
 sensor selects its 24 MHz INCK profile). The daemon sets the SoC-side clock
 to match the requested mode during MIPI bring-up, by writing
 `/sys/module/open_sys_config/parameters/sns0_clk_hz`.
@@ -1828,9 +1828,10 @@ Every other mode then runs at the wrong rate, scaled by the clock ratio
 CV610 preserves the same envelope and `selected_pad` / `selected_mode` /
 `pads[].modes[]` shape. It reports one synthetic pad holding the fixed-rate
 modes of the sensor `$SENSOR` names (see `docs/CV610_BACKEND.md`, "Sensor
-selection"); each entry has equal `min_fps` and `max_fps`. IMX662 lists five,
+selection"); each entry has equal `min_fps` and `max_fps`. IMX662 lists six,
 not in rate order: 1080p30/60 RAW12, 1080p90/100 RAW10, then 1080p95 RAW10 at
-index 4 (appended in 0.92.0 so the earlier indices kept their meaning); IMX335 lists five (2592x1944p30
+index 4 (appended in 0.92.0) and 1080p94 RAW10 at index 5 (0.93.0), appended so
+the earlier indices kept their meaning; IMX335 lists five (2592x1944p30
 RAW12, 1296x972p60 binned, 1080p90 crop, 2592x1944p40, 2592x1520p30 crop);
 its two-lane row `imx335_2l` lists four (2592x1944p30, p40 and p45 and a
 2560x1440p60 window, RAW10).
