@@ -93,7 +93,7 @@ The channel capability record returned:
 | H.265 tools | Encoder defaults plus resilience/slices | Deblock, SAO, transform, entropy, CU prediction, search window, deblur and motion-stat controls exported | Documented future tuning surface |
 | Low delay | SigmaStar stream modes were rejected in prior device tests; production is frame-based | Slice-output plus VI/VPSS low-delay APIs exist | Best candidate for a later sub-frame experiment, requiring transport redesign |
 | Channels | Header declares 9; project uses main, optional record and snapshot channels | Header declares 16; project uses channel 0 | Theoretical CV610 headroom only |
-| Sensor envelope here | IMX335 combinations reach 2560x1920 and up to 144 fps | IMX662 modes are 1080p30/60/90/100, with VPSS downscale | Star6E currently offers the broader integrated mode set |
+| Sensor envelope here | IMX335 combinations reach 2560x1920 and up to 144 fps | IMX662 modes are 1080p30/60/90/95/100, with VPSS downscale | Star6E currently offers the broader integrated mode set |
 
 ## CV610 controls deliberately deferred
 

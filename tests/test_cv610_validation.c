@@ -113,6 +113,21 @@ static int test_mode_table(void)
 				slow->sensor_clock_hz == 37125000u);
 		}
 	}
+	/* 95 is the 100 fps setup slowed by VMAX; appended so pinned indices
+	 * keep their meaning. */
+	{
+		const Cv610SensorMode *m95 = mode_at_fps(g_imx662, 95);
+		const Cv610SensorMode *m100 = mode_at_fps(g_imx662, 100);
+
+		failures += expect("modes_95fps_shares_100fps_setup",
+			m95 != NULL && m100 != NULL &&
+			m95->sensor_clock_hz == m100->sensor_clock_hz &&
+			m95->raw_bit == m100->raw_bit);
+		failures += expect("modes_indices_stable",
+			modes[0].fps == 30 && modes[1].fps == 60 &&
+			modes[2].fps == 90 && modes[3].fps == 100 &&
+			modes[count - 1].fps == 95);
+	}
 	return failures;
 }
 
@@ -181,6 +196,8 @@ static int test_mode_select(void)
 	 * mode that can keep up exists. */
 	failures += select_ok("select_auto_rounds_up", -1, 45, 60);
 	failures += select_ok("select_auto_just_below_top", -1, 99, 100);
+	failures += select_ok("select_auto_exact_95", -1, 95, 95);
+	failures += select_ok("select_auto_rounds_up_to_95", -1, 93, 95);
 	failures += select_ok("select_auto_below_all", -1, 1, 30);
 	/* Above every mode clamps to the FASTEST.  A literal port of SigmaStar's
 	 * sensor_mode_cost tie-break would answer 30 here, which is the wart this
@@ -373,7 +390,8 @@ static int test_sensor_table(void)
 }
 
 /* Validation reads the table of the sensor SENSOR names, so an index that
- * exists only on IMX335 is valid there and an error on IMX662. */
+ * exists on one sensor is an error on another: index 4 is IMX662's 95 fps
+ * row and IMX335's 2592x1520 crop, but past the end of the two-lane table. */
 static int test_validate_imx335(void)
 {
 	VencConfig cfg;
@@ -384,7 +402,9 @@ static int test_validate_imx335(void)
 	cfg.video0.width = 1920;
 	cfg.video0.height = 1080;
 	cfg.sensor.mode = 4;
-	failures += expect_valid("imx335_mode4_rejected_on_imx662", &cfg, 0);
+	failures += expect_valid("mode4_accepted_on_imx662", &cfg, 1);
+	setenv("SENSOR", "imx335_2l", 1);
+	failures += expect_valid("mode4_rejected_on_imx335_2l", &cfg, 0);
 	setenv("SENSOR", "imx335", 1);
 	failures += expect_valid("imx335_mode4_accepted", &cfg, 1);
 	cfg.sensor.mode = -1;
