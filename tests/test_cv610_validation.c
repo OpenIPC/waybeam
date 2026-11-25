@@ -113,15 +113,16 @@ static int test_mode_table(void)
 				slow->sensor_clock_hz == 37125000u);
 		}
 	}
-	/* 95 fps is the 100 fps mode slowed by VMAX, so it must share that
-	 * mode's 27 MHz clock and RAW10 -- and it is appended, so the indices
-	 * configs already pin (sensor.mode 1 = 60, 3 = 100) do not move. */
+	/* 95 is the 100 fps setup slowed by VMAX; appended so pinned indices
+	 * keep their meaning. */
 	{
 		const Cv610SensorMode *m95 = mode_at_fps(g_imx662, 95);
+		const Cv610SensorMode *m100 = mode_at_fps(g_imx662, 100);
 
 		failures += expect("modes_95fps_shares_100fps_setup",
-			m95 != NULL && m95->sensor_clock_hz == 27000000u &&
-			m95->raw_bit == 10);
+			m95 != NULL && m100 != NULL &&
+			m95->sensor_clock_hz == m100->sensor_clock_hz &&
+			m95->raw_bit == m100->raw_bit);
 		failures += expect("modes_indices_stable",
 			modes[0].fps == 30 && modes[1].fps == 60 &&
 			modes[2].fps == 90 && modes[3].fps == 100 &&

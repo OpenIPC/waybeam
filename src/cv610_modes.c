@@ -16,11 +16,10 @@
  * INCK profile overclocked to 27 MHz (INCK_SEL 0x04); the rest run 37.125 MHz.
  *
  * 95 fps is the 100 fps mode with a longer frame: the plugin takes its
- * 100 fps setup for any rate above 90 and stretches VMAX by 100/95
- * (cmos_fps_set), so it shares that mode's clock, bit depth and readout.  It
- * exists for a VRR display whose ceiling is 100 Hz: at exactly 100 fps any
- * clock skew queues frames against the panel's minimum frame time.  Appended
- * last, because /api/v1/modes indices (sensor.mode) must not move. */
+ * 100 fps setup above 90 fps and cmos_fps_set() stretches VMAX, so it shares
+ * that mode's clock, bit depth and readout.  It is for a 100 Hz VRR display,
+ * where exactly 100 fps queues frames.  Appended last: sensor.mode indices
+ * are config and must not move. */
 static const Cv610SensorMode g_imx662_modes[] = {
 	{ 1920, 1080,  30, 12, 37125000u, "1080p30 RAW12", 0 },
 	{ 1920, 1080,  60, 12, 37125000u, "1080p60 RAW12", 0 },
