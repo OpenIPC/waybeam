@@ -177,8 +177,8 @@ static td_void cmos_fps_set(ot_vi_pipe vi_pipe, td_float fps, ot_isp_ae_sensor_d
 	/* The running frame length follows the new rate too: cmos_inttime_update()
 	 * computes SHR0 against fl[0], so a stale one offsets exposure by the
 	 * frame-length change once VMAX has moved.  Bring-up reaches this with a
-	 * rate below the mode's own too: venc's 95 fps row runs the 100 fps mode,
-	 * and this stretch is what makes it 95. */
+	 * rate below the mode's own too: venc's 95 and 94 fps rows run the 100 fps
+	 * mode, and this stretch is what makes them 95 and 94. */
 	sns_state->fl[0]           = sns_state->fl_std;
 	ae_sns_dft->full_lines     = sns_state->fl[0];
 	cmos_config_vmax(sns_state, vmax);

@@ -3,9 +3,9 @@
 #include <stdlib.h>
 #include <strings.h>
 
-/* ---- IMX662: 1920x1080, five rates ---------------------------------------
+/* ---- IMX662: 1920x1080, six rates ----------------------------------------
  *
- * All five entries are hardware-verified on the IMX662 bring-up board.
+ * All six entries are hardware-verified on the IMX662 bring-up board.
  *
  * The clock column is the one that bites.  The sensor keeps whatever line
  * timing it was programmed with regardless of the MCLK it is actually fed,
@@ -18,14 +18,17 @@
  * 95 fps is the 100 fps mode with a longer frame: the plugin takes its
  * 100 fps setup above 90 fps and cmos_fps_set() stretches VMAX, so it shares
  * that mode's clock, bit depth and readout.  It is for a 100 Hz VRR display,
- * where exactly 100 fps queues frames.  Appended last: sensor.mode indices
- * are config and must not move. */
+ * where exactly 100 fps queues frames.  94 is the same stretch one step
+ * further: measured on a 100 Hz FreeSync panel it is the fastest rate whose
+ * every frame still gets its own refresh at 1080p.  Appended last:
+ * sensor.mode indices are config and must not move. */
 static const Cv610SensorMode g_imx662_modes[] = {
 	{ 1920, 1080,  30, 12, 37125000u, "1080p30 RAW12", 0 },
 	{ 1920, 1080,  60, 12, 37125000u, "1080p60 RAW12", 0 },
 	{ 1920, 1080,  90, 10, 37125000u, "1080p90 RAW10", 0 },
 	{ 1920, 1080, 100, 10, 27000000u, "1080p100 RAW10", 0 },
 	{ 1920, 1080,  95, 10, 27000000u, "1080p95 RAW10", 0 },
+	{ 1920, 1080,  94, 10, 27000000u, "1080p94 RAW10", 0 },
 };
 
 /* ---- IMX335: 2592x1944 and crops, five fixed modes -----------------------

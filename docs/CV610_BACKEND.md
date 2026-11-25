@@ -13,7 +13,7 @@ large control surface.
 - `SOC_BUILD=cv610` produces a 32-bit ARMv7 musl `waybeam` binary.
 - The backend owns the proven IMX662 MIPI -> VI -> ISP -> VENC lifecycle, and
   drives an IMX335 through the same graph (see "Sensor selection").
-- IMX662: linear 1920x1080 modes at 30/60 fps RAW12 and 90/100/95 fps RAW10.
+- IMX662: linear 1920x1080 modes at 30/60 fps RAW12 and 90/100/95/94 fps RAW10.
   IMX335: five fixed modes (see "Sensor selection"). The tables in
   `src/cv610_modes.c` are the only place they are written down.
 - H.265 CBR and GOP come from the existing `VencConfig` fields. `video0.qpDelta`
@@ -350,9 +350,9 @@ endpoint lists is exactly what `/api/v1/set` accepts — for the sensor
 `$SENSOR` names. Each table mirrors its plugin's own (`g_imx662_mode_tbl` in
 `sensors/cv610/imx662/imx662_cmos.c`, `mode_tbl[]` in openhisilicon's
 `sony_imx335`); adding a mode means editing both.  The exception is a row
-that is a slower frame of an existing plugin mode: IMX662's 95 fps row is the
-plugin's 100 fps mode with VMAX stretched by `cmos_fps_set()`, so it has no
-plugin row of its own.  Append new rows: `sensor.mode` indices are config. The geometry listed by
+that is a slower frame of an existing plugin mode: IMX662's 95 and 94 fps rows are
+the plugin's 100 fps mode with VMAX stretched by `cmos_fps_set()`, so they
+have no plugin row of their own.  Append new rows: `sensor.mode` indices are config. The geometry listed by
 `/api/v1/modes` is what the sensor captures, not the encoded size.
 
 A zero `video0.size` (`auto`) means the mode's own capture size, rounded
@@ -362,7 +362,7 @@ request.
 
 ## Sensor clock
 
-The IMX662 runs 30/60/90 fps on a 37.125 MHz input clock and 95/100 fps on
+The IMX662 runs 30/60/90 fps on a 37.125 MHz input clock and 94/95/100 fps on
 27 MHz — the latter feeds 27 MHz while the sensor selects its 24 MHz INCK
 profile (register `0x3014 = 0x04`). The two halves must agree: the sensor
 keeps its programmed line timing regardless, so a mismatch is silent and

@@ -77,7 +77,7 @@ still requires device validation and readback.
 | Slices | Whole-AU multi-slice implemented; delivered geometry is logged | Whole-AU row splitting confirmed; one unit is a 32-pixel LCU row | Integrated with early output disabled |
 | Native loss handling | Waybeam heals reference-chain-breaking output drops with paced IDRs | Additionally offers encoder-side P-skip and super-frame discard/re-encode | Experiment separately after parity |
 | VUI/user data | No VUI or SEI control is currently loaded | H.265 VUI is already programmed; user-data insertion is available | CV610 is ahead here |
-| Sensor envelope in this project | IMX335 modes reach 2560x1920 and up to 144 fps depending on geometry | IMX662 modes are 1080p30/60/90/95/100; VPSS can scale down | Star6E currently offers more spatial/high-FPS mode variety; CV610's encoder record is not the sensor limit |
+| Sensor envelope in this project | IMX335 modes reach 2560x1920 and up to 144 fps depending on geometry | IMX662 modes are 1080p30/60/90/94/95/100; VPSS can scale down | Star6E currently offers more spatial/high-FPS mode variety; CV610's encoder record is not the sensor limit |
 | Channels | Vendor header declares 9 VENC channels; project uses main, optional record and snapshot channels | Vendor header declares 16 channels; project uses only channel 0 | CV610 has theoretical multi-channel headroom, not current feature parity |
 | Early slice/low delay | SigmaStar streaming modes were rejected in prior device work; production remains frame-based | VENC slice output plus VI/VPSS low-delay APIs exist | CV610 is the better candidate for a future sub-frame-latency experiment |
 
